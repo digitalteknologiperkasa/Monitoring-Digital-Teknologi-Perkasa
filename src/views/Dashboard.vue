@@ -1,9 +1,11 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 import axios from '../lib/axios'
 import { useAuthStore } from '../stores/auth'
 
+const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(true)
 
@@ -73,6 +75,14 @@ const formatTime = (dateStr) => {
 }
 
 // Data Fetching
+const handleActivityClick = (activity) => {
+  if (activity.parent_type === 'LOG') {
+    router.push({ path: '/logs', query: { detailId: activity.parent_id } })
+  } else if (activity.parent_type === 'FEATURE') {
+    router.push({ path: '/features', query: { detailId: activity.parent_id } })
+  }
+}
+
 const fetchData = async () => {
   loading.value = true
   try {
@@ -181,8 +191,10 @@ const fetchData = async () => {
         user: d.user?.full_name || 'User',
         action: `mengomentari di forum ${d.parent_type}`,
         time: formatTime(d.created_at),
-        avatar: d.user?.avatar_url || `https://i.pravatar.cc/150?u=${d.user_id}`,
-        preview: d.comment_text
+        avatar: d.user?.avatar_url || `https://ui-avatars.com/api/?name=${d.user?.full_name || 'User'}&background=random`,
+        preview: d.comment_text,
+        parent_id: d.parent_id,
+        parent_type: d.parent_type
       }))
     }
 
@@ -432,7 +444,7 @@ onMounted(() => {
             Aktivitas Diskusi Terkini
           </h3>
           <div class="space-y-6">
-            <div v-for="(activity, i) in recentActivities" :key="i" class="flex gap-4 group cursor-pointer" @click="$router.push(activity.action.includes('LOG') ? '/logs' : '/features')">
+            <div v-for="(activity, i) in recentActivities" :key="i" class="flex gap-4 group cursor-pointer" @click="handleActivityClick(activity)">
               <div class="relative">
                 <img :src="activity.avatar" class="size-10 rounded-full border-2 border-white dark:border-gray-800 shadow-sm" />
                 <div v-if="activity.icon" class="absolute -bottom-1 -right-1 size-5 bg-rose-500 text-white rounded-full flex items-center justify-center border-2 border-white dark:border-[#141414]">

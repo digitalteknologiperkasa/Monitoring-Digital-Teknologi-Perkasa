@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import axios from '../lib/axios'
 import { useAuthStore } from '../stores/auth'
 import { supabase } from '../lib/supabase' // Keep for auth session check fallback
@@ -38,6 +39,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['toggleDarkMode'])
+const route = useRoute()
 
 // --- APP STATE ---
 const logs = ref([])
@@ -112,6 +114,52 @@ const handlePopupConfirm = () => {
     popup.value.confirmCallback()
   }
   closePopup()
+}
+
+const openDropdownId = ref(null) // Track which dropdown is open
+
+const toggleDropdown = (id) => {
+  openDropdownId.value = openDropdownId.value === id ? null : id
+}
+
+// Close dropdown when clicking outside
+onMounted(() => {
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.status-dropdown-container')) {
+      openDropdownId.value = null
+    }
+  })
+})
+
+const updateLogStatus = async (logId, newStatus) => {
+  if (!['Super Admin', 'Admin', 'Editor'].includes(currentUserRole.value)) {
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk mengubah status.', 'error')
+    return
+  }
+
+  try {
+    // Map status for DB if needed (though existing mapping logic handles form data)
+    let dbStatus = newStatus
+    if (dbStatus === 'on progress') dbStatus = 'on progres'
+    if (dbStatus === 'todo') dbStatus = 'to do'
+
+    await axios.patch(`/logs?id=eq.${logId}`, { 
+      status: dbStatus,
+      updated_at: new Date().toISOString()
+    })
+
+    // Update local state
+    const log = logs.value.find(l => l.id === logId)
+    if (log) {
+      log.status = dbStatus
+    }
+    
+    openDropdownId.value = null
+    triggerPopup('Berhasil!', `Status berhasil diubah menjadi ${newStatus}`, 'success')
+  } catch (error) {
+    console.error('Error updating status:', error)
+    triggerPopup('Gagal!', 'Gagal memperbarui status: ' + error.message, 'error')
+  }
 }
 
 // Filters & Pagination
@@ -960,6 +1008,25 @@ onMounted(async () => {
   await fetchDefaultProject()
   await fetchProfiles() // Load profiles for default project
   await fetchLogs()
+
+  // Check for detailId query param
+  if (route.query.detailId) {
+    const logId = parseInt(route.query.detailId)
+    const log = logs.value.find(l => l.id === logId)
+    if (log) {
+      navigateTo('detail', log)
+    } else {
+      // Try to fetch specific log if not found in current list
+      try {
+        const { data } = await axios.get(`/logs?id=eq.${logId}&select=*,reporter:profiles!reporter_id(full_name,avatar_url)`)
+        if (data && data.length > 0) {
+          navigateTo('detail', data[0])
+        }
+      } catch (e) {
+        console.error('Error fetching specific log details:', e)
+      }
+    }
+  }
 })
 </script>
 
@@ -1191,10 +1258,36 @@ onMounted(async () => {
                   </div>
                   <div class="text-[10px] text-gray-500 dark:text-gray-400 font-medium">ID: #{{ log.id.toString().slice(0,8) }}</div>
                 </td>
-                <td class="px-6 py-4">
-                  <span :class="getStatusBadgeClass(log.status)" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider">
-                    {{ log.status }}
-                  </span>
+                <td class="px-6 py-4 relative status-dropdown-container">
+                  <div class="flex items-center gap-2">
+                    <span :class="getStatusBadgeClass(log.status)" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider">
+                      {{ log.status }}
+                    </span>
+                    <button 
+                      v-if="['Super Admin', 'Admin', 'Editor'].includes(currentUserRole)"
+                      @click.stop="toggleDropdown(log.id)"
+                      class="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">expand_more</span>
+                    </button>
+                  </div>
+                  
+                  <!-- Dropdown Menu -->
+                  <div 
+                    v-if="openDropdownId === log.id"
+                    class="absolute left-6 top-10 z-50 w-40 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-slate-200 dark:border-gray-700 py-1 animate-in fade-in zoom-in duration-200"
+                  >
+                    <button
+                      v-for="status in statuses.filter(s => s !== 'All')"
+                      :key="status"
+                      @click.stop="updateLogStatus(log.id, status)"
+                      class="w-full text-left px-4 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                      :class="{'bg-slate-50 dark:bg-slate-800 font-medium': log.status === status}"
+                    >
+                      <span :class="getStatusBadgeClass(status)" class="w-2 h-2 rounded-full block border-0"></span>
+                      {{ status }}
+                    </button>
+                  </div>
                 </td>
                 <td class="px-6 py-4">
                   <span :class="getPriorityBadgeClass(log.priority)" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider">

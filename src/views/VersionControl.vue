@@ -19,6 +19,44 @@ const selectedVersion = ref(null)
 const showModal = ref(false)
 const modalLoading = ref(false)
 const isEditing = ref(false)
+const openDropdownId = ref(null) // Track which dropdown is open
+const statusOptions = ['Pending QA', 'In Progress', 'Done', 'Rejected']
+
+const toggleDropdown = (id) => {
+  openDropdownId.value = openDropdownId.value === id ? null : id
+}
+
+// Close dropdown when clicking outside
+onMounted(() => {
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.status-dropdown-container')) {
+      openDropdownId.value = null
+    }
+  })
+})
+
+const updateStatus = async (versionId, newStatus) => {
+  try {
+    const { error } = await supabase
+      .from('version_logs')
+      .update({ status: newStatus })
+      .eq('id', versionId)
+
+    if (error) throw error
+
+    // Update local state
+    const version = versions.value.find(v => v.id === versionId)
+    if (version) {
+      version.status = newStatus
+      version.raw.status = newStatus
+    }
+    openDropdownId.value = null
+  } catch (error) {
+    console.error('Error updating status:', error)
+    alert('Gagal memperbarui status: ' + error.message)
+  }
+}
+
 const form = ref({
   id: null,
   version_number: '',
@@ -52,7 +90,7 @@ const fetchVersions = async () => {
       .from('version_logs')
       .select('*, app_components(id, name)')
       .eq('project_id', projectId)
-      .order('release_date', { ascending: false })
+      .order('created_at', { ascending: false })
 
     const { data, error } = await query
     
@@ -84,7 +122,7 @@ const fetchModules = async () => {
     const { data, error } = await supabase
       .from('app_components')
       .select('id, name')
-      .eq('project_id', projectId)
+      // .eq('project_id', projectId) // Removed to match AccessControl.vue behavior
       .order('name')
     
     if (error) throw error
@@ -158,6 +196,9 @@ const saveVersion = async () => {
       project_id: authStore.user?.project_id || defaultProjectId.value || 1,
       pic_id: authStore.user?.id
     }
+
+    // Remove id if it is null so database generates it
+    if (!payload.id) delete payload.id
 
     console.log('Saving version with payload:', payload)
 
@@ -362,10 +403,36 @@ const getTypeIconClass = (type) => {
                   <div class="text-[11px] truncate mt-0.5" :title="v.raw.details">{{ v.raw.details }}</div>
                 </td>
                 <td class="px-6 py-5 text-slate-900 dark:text-slate-200">{{ v.pic }}</td>
-                <td class="px-6 py-5">
-                  <span :class="getStatusBadgeClass(v.status)" class="px-2 py-1 text-[10px] font-bold rounded border uppercase tracking-wider">
-                    {{ v.status }}
-                  </span>
+                <td class="px-6 py-5 relative status-dropdown-container">
+                  <div class="flex items-center gap-2">
+                    <span :class="getStatusBadgeClass(v.status)" class="px-2 py-1 text-[10px] font-bold rounded border uppercase tracking-wider">
+                      {{ v.status }}
+                    </span>
+                    <button 
+                      v-if="['Super Admin', 'Admin', 'Editor'].includes(authStore.user?.role)"
+                      @click.stop="toggleDropdown(v.id)"
+                      class="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">expand_more</span>
+                    </button>
+                  </div>
+                  
+                  <!-- Dropdown Menu -->
+                  <div 
+                    v-if="openDropdownId === v.id"
+                    class="absolute left-6 top-14 z-50 w-48 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-slate-200 dark:border-gray-700 py-1 animate-in fade-in zoom-in duration-200"
+                  >
+                    <button
+                      v-for="status in statusOptions"
+                      :key="status"
+                      @click.stop="updateStatus(v.id, status)"
+                      class="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                      :class="{'bg-slate-50 dark:bg-slate-800 font-medium': v.status === status}"
+                    >
+                      <span :class="getStatusBadgeClass(status)" class="w-2 h-2 rounded-full block border-0"></span>
+                      {{ status }}
+                    </button>
+                  </div>
                 </td>
                 <td class="px-6 py-5 text-right">
                   <div v-if="['Super Admin', 'Admin', 'Editor'].includes(authStore.user?.role)" class="flex items-center justify-end gap-2">

@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import axios from '../lib/axios'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
+const route = useRoute()
 const loading = ref(true)
 const requests = ref([])
 const stats = ref({
@@ -21,6 +23,11 @@ const showRejectionModal = ref(false)
 const rejectionReason = ref('')
 const modalLoading = ref(false)
 const selectedRequest = ref(null)
+const openDropdownId = ref(null)
+
+const toggleDropdown = (id) => {
+  openDropdownId.value = openDropdownId.value === id ? null : id
+}
 const projects = ref([])
 const components = ref([])
 const allProfiles = ref([]) // Untuk pilihan pelapor
@@ -56,6 +63,7 @@ const statusOrder = {
   'Selesai': 5,
   'Ditolak': 6
 }
+const availableStatuses = Object.keys(statusOrder)
 
 const filteredRequests = computed(() => {
   let result = [...requests.value]
@@ -392,6 +400,7 @@ const updateStatus = async (id, newStatus) => {
   }
   if (newStatus === 'Ditolak' && !showRejectionModal.value) {
     showRejectionModal.value = true
+    openDropdownId.value = null // Close dropdown when opening rejection modal
     return
   }
 
@@ -428,6 +437,7 @@ const updateStatus = async (id, newStatus) => {
       const updatedReq = requests.value.find(r => r.id === id)
       if (updatedReq) selectedRequest.value = updatedReq
     }
+    openDropdownId.value = null
     alert(`Status berhasil diperbarui ke ${newStatus}`)
   } catch (error) {
     console.error('Error updating status:', error)
@@ -573,10 +583,29 @@ const statsCards = computed(() => ({
   'Ditolak/Arsip': stats.value.rejected
 }))
 
-onMounted(() => {
-  fetchInitialData()
-  fetchRequests()
-  fetchProfiles()
+onMounted(async () => {
+  await fetchInitialData()
+  await fetchProfiles()
+  await fetchRequests()
+
+  // Check for detailId query param
+  if (route.query.detailId) {
+    const reqId = parseInt(route.query.detailId)
+    const req = requests.value.find(r => r.id === reqId)
+    if (req) {
+      openDetail(req)
+    } else {
+      // Try to fetch specific request if not found in current list
+      try {
+        const { data } = await axios.get(`/feature_requests?id=eq.${reqId}&select=*,reporter:profiles(full_name,avatar_url),component:app_components(name),project:projects(name)`)
+        if (data && data.length > 0) {
+          openDetail(data[0])
+        }
+      } catch (e) {
+        console.error('Error fetching specific feature request details:', e)
+      }
+    }
+  }
 })
 
 watch(() => form.value.project_id, () => {
@@ -687,10 +716,36 @@ watch(() => form.value.project_id, () => {
                   {{ req.urgensi }}
                 </span>
               </td>
-              <td class="px-6 py-5 text-center">
-                <span class="status-badge shadow-sm" :class="getStatusClass(req.status_lifecycle)">
-                  {{ req.status_lifecycle }}
-                </span>
+              <td class="px-6 py-5 text-center relative status-dropdown-container">
+                <div class="flex items-center justify-center gap-2">
+                  <span class="status-badge shadow-sm" :class="getStatusClass(req.status_lifecycle)">
+                    {{ req.status_lifecycle }}
+                  </span>
+                  <button 
+                    v-if="['Super Admin', 'Admin', 'Editor'].includes(authStore.user?.role)"
+                    @click.stop="toggleDropdown(req.id)"
+                    class="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  >
+                    <span class="material-symbols-outlined text-[16px]">expand_more</span>
+                  </button>
+                </div>
+
+                <!-- Dropdown Menu -->
+                <div 
+                  v-if="openDropdownId === req.id"
+                  class="absolute right-6 top-12 z-50 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-slate-200 dark:border-gray-700 py-1 animate-in fade-in zoom-in duration-200 text-left"
+                >
+                  <button
+                    v-for="status in availableStatuses"
+                    :key="status"
+                    @click.stop="updateStatus(req.id, status)"
+                    class="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                    :class="{'bg-slate-50 dark:bg-slate-800': req.status_lifecycle === status}"
+                  >
+                    <span :class="getStatusClass(status)" class="w-2 h-2 rounded-full block border shadow-sm"></span>
+                    {{ status }}
+                  </button>
+                </div>
               </td>
               <td class="px-6 py-5 text-right">
                 <button 
