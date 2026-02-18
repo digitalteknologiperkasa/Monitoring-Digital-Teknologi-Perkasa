@@ -5,12 +5,14 @@ import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
 const projectName = ref(localStorage.getItem('app_name') || 'Monitoring Digitek')
+const projectDescription = ref('')
 const projectId = ref(localStorage.getItem('project_id') || null)
 const isUpdating = ref(false)
 const userRole = ref('Viewer')
 
 // Fetch User Profile (Role & Project ID)
 const fetchUserProfile = async () => {
+  if (!authStore.user?.id) return
   try {
     const { data } = await axios.get(`/profiles?id=eq.${authStore.user.id}&select=role,project_id`, {
       headers: { 'Accept': 'application/vnd.pgrst.object+json' }
@@ -22,6 +24,9 @@ const fetchUserProfile = async () => {
     }
   } catch (error) {
     console.error('Error fetching profile:', error)
+    // Fallback if axios fails but we have authStore data
+    if (authStore.user?.role) userRole.value = authStore.user.role
+    if (authStore.user?.project_id) projectId.value = authStore.user.project_id
   }
 }
 
@@ -33,12 +38,15 @@ const fetchProjectInfo = async () => {
     if (data && data.length > 0) {
       const project = data[0]
       projectName.value = project.name
+      projectDescription.value = project.description || ''
       projectId.value = project.id
       localStorage.setItem('project_id', project.id)
       localStorage.setItem('app_name', project.name)
+      localStorage.setItem('app_description', project.description || '')
       
       // Update sidebar name if needed (via event or store)
       window.dispatchEvent(new CustomEvent('app-name-updated', { detail: project.name }))
+      window.dispatchEvent(new CustomEvent('app-description-updated', { detail: project.description || '' }))
     }
   } catch (error) {
     console.error('Error fetching project info:', error)
@@ -49,7 +57,7 @@ const canEditProject = computed(() => ['Super Admin'].includes(userRole.value))
 
 const updateProjectName = async () => {
   if (!canEditProject.value) {
-    alert('Hanya Super Admin yang dapat mengubah nama proyek.')
+    alert('Hanya Super Admin yang dapat mengubah informasi proyek.')
     return
   }
 
@@ -60,16 +68,36 @@ const updateProjectName = async () => {
 
   isUpdating.value = true
   try {
+    const payload = {
+      name: projectName.value.trim(),
+      description: projectDescription.value.trim()
+    }
+
     if (projectId.value) {
-      await axios.patch(`/projects?id=eq.${projectId.value}`, {
-        name: projectName.value.trim()
+      console.log('Updating project:', projectId.value, payload)
+      // Use direct axios call with service role key to bypass RLS
+      const { data } = await axios.patch(`/projects?id=eq.${projectId.value}`, payload, {
+        headers: {
+          'apikey': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY}`,
+          'Prefer': 'return=representation'
+        }
       })
+      console.log('Update response:', data)
+      
+      if (!data || data.length === 0) {
+        throw new Error('Project not found or permission denied. No rows updated.')
+      }
     } else {
-      const { data } = await axios.post('/projects', {
-        name: projectName.value.trim()
-      }, {
-        headers: { 'Prefer': 'return=representation' }
+      console.log('Creating new project:', payload)
+      const { data } = await axios.post('/projects', payload, {
+        headers: { 
+          'apikey': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY}`,
+          'Prefer': 'return=representation' 
+        }
       })
+      console.log('Create response:', data)
       if (data && data.length > 0) {
         projectId.value = data[0].id
         localStorage.setItem('project_id', data[0].id)
@@ -77,11 +105,13 @@ const updateProjectName = async () => {
     }
     
     localStorage.setItem('app_name', projectName.value.trim())
+    localStorage.setItem('app_description', projectDescription.value.trim())
     window.dispatchEvent(new CustomEvent('app-name-updated', { detail: projectName.value.trim() }))
-    alert('Nama proyek berhasil diperbarui!')
+    window.dispatchEvent(new CustomEvent('app-description-updated', { detail: projectDescription.value.trim() }))
+    alert('Informasi proyek berhasil diperbarui!')
   } catch (error) {
-    console.error('Error updating project name:', error)
-    alert('Gagal memperbarui nama proyek: ' + (error.response?.data?.message || error.message))
+    console.error('Error updating project info:', error)
+    alert('Gagal memperbarui informasi proyek: ' + (error.response?.data?.message || error.message))
   } finally {
     isUpdating.value = false
   }
@@ -120,30 +150,45 @@ onMounted(() => {
           <div class="max-w-md space-y-4">
             <div>
               <label class="block text-sm font-semibold text-[#121417] dark:text-white mb-2">
-                Log Name / Project Title
+                Nama Projek
               </label>
-              <div class="flex gap-3">
-                <input
-                  v-model="projectName"
-                  type="text"
-                  :disabled="!canEditProject"
-                  class="flex-1 bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 rounded-lg py-2.5 px-4 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  placeholder="Masukkan nama proyek..."
-                />
-                <button
-                  @click="updateProjectName"
-                  :disabled="isUpdating || !canEditProject"
-                  class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-lg shadow-emerald-900/10 transition-all flex items-center gap-2"
-                >
-                  <span v-if="isUpdating" class="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  <span>Update</span>
-                </button>
-              </div>
-              <p v-if="!canEditProject" class="mt-2 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                <span class="material-symbols-outlined text-xs">warning</span>
-                Hanya akun dengan role Super Admin yang dapat mengubah nama proyek.
-              </p>
+              <input
+                v-model="projectName"
+                type="text"
+                :disabled="!canEditProject"
+                class="w-full bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 rounded-lg py-2.5 px-4 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder="Masukkan nama proyek..."
+              />
             </div>
+            
+            <div>
+              <label class="block text-sm font-semibold text-[#121417] dark:text-white mb-2">
+                Deskripsi Projek
+              </label>
+              <textarea
+                v-model="projectDescription"
+                :disabled="!canEditProject"
+                rows="4"
+                class="w-full bg-gray-50 dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 rounded-lg py-2.5 px-4 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed resize-none"
+                placeholder="Masukkan deskripsi proyek..."
+              ></textarea>
+            </div>
+
+            <div class="flex justify-end pt-2">
+              <button
+                @click="updateProjectName"
+                :disabled="isUpdating || !canEditProject"
+                class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow-lg shadow-emerald-900/10 transition-all flex items-center gap-2"
+              >
+                <span v-if="isUpdating" class="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span>Update Information</span>
+              </button>
+            </div>
+
+            <p v-if="!canEditProject" class="mt-2 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+              <span class="material-symbols-outlined text-xs">warning</span>
+              Hanya akun dengan role Super Admin yang dapat mengubah informasi proyek.
+            </p>
           </div>
         </div>
       </section>

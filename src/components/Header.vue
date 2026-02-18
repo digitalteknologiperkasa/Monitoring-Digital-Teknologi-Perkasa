@@ -67,10 +67,10 @@ const route = useRoute()
         </div>
         
         <!-- Background Icons (Optional for better aesthetics) -->
-        <div class="flex justify-between w-full px-1 opacity-20 dark:opacity-40">
+        <!-- <div class="flex justify-between w-full px-1 opacity-20 dark:opacity-40">
           <span class="material-symbols-outlined text-[14px]">light_mode</span>
           <span class="material-symbols-outlined text-[14px]">dark_mode</span>
-        </div>
+        </div> -->
       </button>
 
       <!-- Notifications -->

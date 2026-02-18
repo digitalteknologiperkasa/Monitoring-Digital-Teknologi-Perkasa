@@ -243,9 +243,8 @@ const fetchProjects = async () => {
     const projectId = authStore.user?.project_id || 1
     
     let url = '/projects?select=id,name'
-    if (!isSuperAdmin) {
-      url += `&id=eq.${projectId}`
-    }
+    // Strict filtering: Always filter by project_id regardless of role
+    url += `&id=eq.${projectId}`
     
     const response = await axios.get(url)
     projects.value = response.data || []
@@ -269,8 +268,8 @@ const fetchProfiles = async () => {
     
     let url = '/profiles?select=id,full_name,avatar_url,project_id,email'
     
-    // Jika bukan Super Admin, filter berdasarkan project_id
-    if (!isSuperAdmin && projectId) {
+    // Strict filtering: Always filter by project_id regardless of role
+    if (projectId) {
       url += `&project_id=eq.${projectId}`
     }
     
@@ -359,9 +358,9 @@ const fetchLogs = async () => {
     // Project Filtering Logic
     if (filterProject.value !== 'All') {
       url += `&project_id=eq.${filterProject.value}`
-    } else if (!isSuperAdmin) {
-      // For non-admins, default to their project or project 2 (dummy data)
-      url += `&project_id=eq.${userProjectId || 2}`
+    } else {
+      // Strict filtering: Always default to user's project
+      url += `&project_id=eq.${userProjectId || 1}`
     }
     
     // Sort
@@ -380,6 +379,8 @@ const fetchLogs = async () => {
       let fallbackUrl = '/logs?select=*'
       if (filterProject.value !== 'All') {
         fallbackUrl += `&project_id=eq.${filterProject.value}`
+      } else {
+        fallbackUrl += `&project_id=eq.${userProjectId || 1}`
       }
       fallbackUrl += '&order=created_at.desc'
       const response = await axios.get(fallbackUrl)
@@ -474,10 +475,33 @@ const navigateTo = (view, log = null) => {
 }
 
 const handleSaveLog = async () => {
-  if (currentView.value === 'add') {
-    await saveNewLog(logForm.value)
-  } else if (currentView.value === 'edit') {
-    await updateLog(logForm.value)
+  console.log('handleSaveLog called')
+  // Manual Validation to ensure user sees error even if fields are off-screen
+  const errors = []
+  if (!logForm.value.version) errors.push('Versi')
+  if (!logForm.value.found_date) errors.push('Tanggal Temuan')
+  if (!logForm.value.module) errors.push('Modul / Area')
+  if (!logForm.value.actual_behavior) errors.push('Hasil Aktual')
+  if (!logForm.value.expected_behavior) errors.push('Harapan')
+  if (!logForm.value.severity_details) errors.push('Tingkat Keparahan / Detail Teknis')
+
+  if (errors.length > 0) {
+    console.log('Validation errors:', errors)
+    triggerPopup('Validasi Gagal', 'Mohon lengkapi data berikut: ' + errors.join(', '), 'warning')
+    return
+  }
+
+  isSubmitting.value = true
+  try {
+    if (currentView.value === 'add') {
+      await saveNewLog(logForm.value)
+    } else if (currentView.value === 'edit') {
+      await updateLog(logForm.value)
+    }
+  } catch (e) {
+    console.error('Unexpected error in handleSaveLog:', e)
+  } finally {
+    isSubmitting.value = false
   }
 }
 
@@ -1092,8 +1116,8 @@ onMounted(async () => {
             <span class="material-symbols-outlined text-[20px]">{{ showCharts ? 'bar_chart_off' : 'bar_chart' }}</span>
             <span>Stats</span>
           </button>
-          <!-- Project Filter (Super Admin/Admin Only) -->
-          <div v-if="['Super Admin', 'Admin'].includes(currentUserRole)" class="relative h-12 min-w-[160px]">
+          <!-- Project Filter (Super Admin/Admin Only) HILANGKAN SAJA KARENA TIDAK BERGUNA-->
+          <!-- <div v-if="['Super Admin', 'Admin'].includes(currentUserRole)" class="relative h-12 min-w-[160px]">
             <select 
               v-model="filterProject"
               class="w-full h-full pl-10 pr-8 bg-white dark:bg-[#1e1e1e] border border-gray-200 dark:border-gray-800 rounded-lg text-sm font-semibold text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-emerald-500/20 appearance-none transition-all cursor-pointer outline-none"
@@ -1103,7 +1127,7 @@ onMounted(async () => {
             </select>
             <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-gray-500 pointer-events-none">folder_open</span>
             <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[18px] text-gray-400 pointer-events-none">expand_more</span>
-          </div>
+          </div> --> 
           <div class="relative h-12 min-w-[140px]">
             <select 
               v-model="filterStatus"
@@ -1379,6 +1403,7 @@ onMounted(async () => {
       
       <form 
         @submit.prevent="handleSaveLog"
+        novalidate
         class="space-y-8 bg-white dark:bg-[#1e1e1e] rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden"
       >
         <div class="bg-gray-50 dark:bg-[#252525] px-8 py-6 border-b border-gray-200 dark:border-gray-800">
@@ -1538,8 +1563,10 @@ onMounted(async () => {
             </button>
             <button 
               type="submit"
-              class="px-8 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold shadow-lg hover:bg-emerald-500 transition-all"
+              :disabled="isSubmitting"
+              class="px-8 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold shadow-lg hover:bg-emerald-500 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
+              <span v-if="isSubmitting" class="material-symbols-outlined animate-spin text-sm">progress_activity</span>
               {{ currentView === 'add' ? 'Simpan Log Bug' : 'Update Log Bug' }}
             </button>
           </div>

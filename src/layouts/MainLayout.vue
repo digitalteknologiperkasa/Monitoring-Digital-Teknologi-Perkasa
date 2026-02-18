@@ -13,6 +13,7 @@ const isDarkMode = ref(localStorage.getItem('darkMode') === 'true')
 const isSidebarOpen = ref(true)
 const isMobileSidebarOpen = ref(false)
 const projectName = ref(localStorage.getItem('app_name') || 'Monitoring Digitek')
+const projectDescription = ref(localStorage.getItem('app_description') || '')
 const userProfile = ref({
   name: 'Memuat...',
   role: 'Viewer', // Default to Viewer
@@ -52,8 +53,13 @@ const updateProjectName = (e) => {
   projectName.value = e.detail
 }
 
+const updateProjectDescription = (e) => {
+  projectDescription.value = e.detail
+}
+
 onMounted(async () => {
   window.addEventListener('app-name-updated', updateProjectName)
+  window.addEventListener('app-description-updated', updateProjectDescription)
   
   // Ensure dark mode is applied on mount
   if (isDarkMode.value) {
@@ -82,13 +88,15 @@ onMounted(async () => {
       // Ambil Nama Projek berdasarkan project_id user
       const { data: project } = await supabase
         .from('projects')
-        .select('name')
+        .select('name, description')
         .eq('id', profile.project_id || 1)
         .single()
       
       if (project) {
         projectName.value = project.name
+        projectDescription.value = project.description || ''
         localStorage.setItem('app_name', project.name)
+        localStorage.setItem('app_description', project.description || '')
         localStorage.setItem('project_id', profile.project_id || 1)
       }
     }
@@ -97,6 +105,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('app-name-updated', updateProjectName)
+  window.removeEventListener('app-description-updated', updateProjectDescription)
 })
 
 const menuItems = [
@@ -133,6 +142,7 @@ const filteredAdminItems = computed(() => {
       :is-mobile-sidebar-open="isMobileSidebarOpen"
       :user-profile="userProfile"
       :project-name="projectName"
+      :project-description="projectDescription"
       :menu-items="menuItems"
       :admin-items="filteredAdminItems"
       @logout="handleLogout"

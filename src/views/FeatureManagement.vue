@@ -221,7 +221,8 @@ const fetchProfiles = async () => {
     
     let url = '/profiles?select=id,full_name,avatar_url,project_id,email'
     
-    if (!isSuperAdmin && projectId) {
+    if (projectId) {
+      // Strict filtering
       url += `&project_id=eq.${projectId}`
     }
     
@@ -263,10 +264,9 @@ const fetchInitialData = async () => {
     let projUrl = '/projects?select=id,name'
     let compUrl = '/app_components?select=id,name'
     
-    if (!isSuperAdmin) {
-      projUrl += `&id=eq.${projectId}`
-      compUrl += `&project_id=eq.${projectId}`
-    }
+    // Strict filtering: Always filter by project_id regardless of role
+    projUrl += `&id=eq.${projectId}`
+    compUrl += `&project_id=eq.${projectId}`
 
     const [projRes, compRes] = await Promise.all([
       axios.get(projUrl),
@@ -297,9 +297,8 @@ const fetchRequests = async () => {
     
     let url = '/feature_requests?select=*,reporter:profiles(full_name,avatar_url),component:app_components(name),project:projects(name)&order=created_at.desc'
     
-    if (!isSuperAdmin) {
-      url += `&project_id=eq.${projectId}`
-    }
+    // Strict filtering: Always filter by project_id regardless of role
+    url += `&project_id=eq.${projectId}`
 
     const { data } = await axios.get(url)
     console.log('Requests fetched via axios:', data)
@@ -1044,6 +1043,109 @@ watch(() => form.value.project_id, () => {
                   </div>
                 </section>
 
+              </div>
+
+              <!-- Sidebar Content (Right) -->
+              <div class="col-span-4 space-y-6">
+                <!-- Urgensi -->
+                <div class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 border-t-4 shadow-sm" :class="getUrgencyBorder(selectedRequest.urgensi)">
+                  <label class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-3 block">Tingkat Urgensi</label>
+                  <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl flex items-center justify-center" :class="getUrgencyBg(selectedRequest.urgensi)">
+                      <span class="material-symbols-outlined text-3xl" :class="getUrgencyText(selectedRequest.urgensi)">priority_high</span>
+                    </div>
+                    <div>
+                      <p class="text-xl font-black tracking-tight" :class="getUrgencyText(selectedRequest.urgensi)">{{ selectedRequest.urgensi?.toUpperCase() }}</p>
+                      <p class="text-[11px] text-slate-400 dark:text-white/40 font-medium">Tingkat prioritas pengembangan</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Timeline Status -->
+                <div class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
+                  <h3 class="text-sm font-black text-slate-800 dark:text-white mb-6">Timeline Status</h3>
+                  <div class="space-y-6 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-px before:bg-slate-100 dark:before:bg-white/10">
+                    <div class="relative pl-8">
+                      <div class="absolute left-0 top-1 w-6 h-6 rounded-full bg-accent-emerald flex items-center justify-center shadow-[0_0_12px_rgba(16,185,129,0.4)]">
+                        <span class="material-symbols-outlined text-[14px] text-primary font-bold">check</span>
+                      </div>
+                      <div>
+                        <p class="text-xs font-black text-slate-800 dark:text-white">Pengajuan Dibuat</p>
+                        <p class="text-[10px] text-slate-400 dark:text-white/40 font-bold">{{ new Date(selectedRequest.created_at).toLocaleDateString('id-ID') }} • Oleh {{ selectedRequest.reporter?.full_name }}</p>
+                      </div>
+                    </div>
+                    
+                    <div v-if="selectedRequest.status_lifecycle !== 'Baru'" class="relative pl-8">
+                      <div class="absolute left-0 top-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center shadow-[0_0_12px_rgba(59,130,246,0.4)]">
+                        <span class="material-symbols-outlined text-[14px] text-white font-bold">visibility</span>
+                      </div>
+                      <div>
+                        <p class="text-xs font-black text-blue-500 dark:text-blue-400">{{ selectedRequest.status_lifecycle }}</p>
+                        <p class="text-[10px] text-slate-400 dark:text-white/40 font-bold">{{ new Date(selectedRequest.updated_at).toLocaleDateString('id-ID') }} • Sistem Auto</p>
+                      </div>
+                    </div>
+
+                    <div v-if="selectedRequest.status_lifecycle === 'Baru'" class="relative pl-8">
+                      <div class="absolute left-0 top-1 w-6 h-6 rounded-full bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/20 flex items-center justify-center">
+                        <div class="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-white/20"></div>
+                      </div>
+                      <div>
+                        <p class="text-xs font-black text-slate-300 dark:text-white/30">Langkah Berikutnya</p>
+                        <p class="text-[10px] text-slate-200 dark:text-white/20 font-bold">Menunggu Peninjauan...</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Alasan Penolakan (Jika ada) -->
+                <div v-if="selectedRequest.status_lifecycle === 'Ditolak'" class="bg-white dark:bg-[#111111] border border-red-500/20 rounded-xl p-6 shadow-sm">
+                  <h3 class="text-sm font-black text-red-500 dark:text-red-400 mb-3 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">error</span> Alasan Penolakan
+                  </h3>
+                  <p class="text-xs text-slate-600 dark:text-white/60 leading-relaxed bg-red-50 dark:bg-red-500/5 p-3 rounded-lg border border-red-100 dark:border-red-500/10 italic font-medium">
+                    {{ selectedRequest.alasan_penolakan || 'Tidak ada alasan yang diberikan.' }}
+                  </p>
+                </div>
+
+                <!-- Action Panel (Management Only) -->
+                <div v-if="['Super Admin', 'Admin', 'Editor'].includes(authStore.user?.role)" class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
+                  <h3 class="text-sm font-black text-slate-800 dark:text-white mb-4">Manajemen Status</h3>
+                  <div class="grid grid-cols-1 gap-2">
+                    <button 
+                      v-for="status in ['Baru', 'Sedang Ditinjau', 'Sedang Dipertimbangkan', 'Sedang Dikembangkan', 'Selesai']" 
+                      :key="status"
+                      @click="updateStatus(selectedRequest.id, status)"
+                      class="w-full px-4 py-2 rounded-lg text-xs font-black transition-all text-left flex items-center justify-between group"
+                      :class="selectedRequest.status_lifecycle === status 
+                        ? 'bg-accent-emerald text-[#032A28]' 
+                        : (status === 'Baru' 
+                        ? 'bg-gray-600/10 text-gray-600 dark:bg-gray-400/10 dark:text-gray-400' 
+                        : 'bg-slate-50 dark:bg-white/5 text-slate-500 dark:text-white/60 hover:bg-slate-100 dark:hover:bg-white/10')"
+                    >
+                      {{ status }}
+                      <span v-if="selectedRequest.status_lifecycle === status" class="material-symbols-outlined text-sm">check_circle</span>
+                    </button>
+                    <button 
+                      @click="updateStatus(selectedRequest.id, 'Ditolak')"
+                      class="w-full px-4 py-2 rounded-lg text-xs font-black transition-all text-left flex items-center justify-between mt-2 bg-red-50 dark:bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white"
+                    >
+                      Tolak / Arsip
+                      <span class="material-symbols-outlined text-sm">cancel</span>
+                    </button>
+                    
+                    <button 
+                      @click="deleteRequest(selectedRequest.id)"
+                      class="w-full px-4 py-2 rounded-lg text-xs font-black transition-all text-left flex items-center justify-between mt-4 border border-red-200 dark:border-red-500/20 text-red-400 dark:text-red-500/60 hover:bg-red-500 hover:text-white"
+                    >
+                      Hapus Permanen
+                      <span class="material-symbols-outlined text-sm">delete</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Full Width Content (Moved) -->
+              <div class="col-span-12 space-y-6">
                 <!-- Lampiran Pendukung -->
                 <section class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
                   <h3 class="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2 mb-6 pb-4 border-b border-slate-100 dark:border-gray-800">
@@ -1069,7 +1171,7 @@ watch(() => form.value.project_id, () => {
                 </section>
 
                 <!-- Forum Diskusi Terpadu -->
-                <section class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 flex flex-col h-[600px] shadow-sm overflow-hidden">
+                <section class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 flex flex-col h-[750px] shadow-sm overflow-hidden">
                   <h3 class="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2 mb-6 pb-4 border-b border-slate-100 dark:border-gray-800 shrink-0">
                     <span class="material-symbols-outlined text-accent-emerald">forum</span>
                     Forum Diskusi Terpadu ({{ comments.length }} Komentar)
@@ -1190,105 +1292,6 @@ watch(() => form.value.project_id, () => {
                     </div>
                   </div>
                 </section>
-              </div>
-
-              <!-- Sidebar Content (Right) -->
-              <div class="col-span-4 space-y-6">
-                <!-- Urgensi -->
-                <div class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 border-t-4 shadow-sm" :class="getUrgencyBorder(selectedRequest.urgensi)">
-                  <label class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-3 block">Tingkat Urgensi</label>
-                  <div class="flex items-center gap-3">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center" :class="getUrgencyBg(selectedRequest.urgensi)">
-                      <span class="material-symbols-outlined text-3xl" :class="getUrgencyText(selectedRequest.urgensi)">priority_high</span>
-                    </div>
-                    <div>
-                      <p class="text-xl font-black tracking-tight" :class="getUrgencyText(selectedRequest.urgensi)">{{ selectedRequest.urgensi?.toUpperCase() }}</p>
-                      <p class="text-[11px] text-slate-400 dark:text-white/40 font-medium">Tingkat prioritas pengembangan</p>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Timeline Status -->
-                <div class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
-                  <h3 class="text-sm font-black text-slate-800 dark:text-white mb-6">Timeline Status</h3>
-                  <div class="space-y-6 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-px before:bg-slate-100 dark:before:bg-white/10">
-                    <div class="relative pl-8">
-                      <div class="absolute left-0 top-1 w-6 h-6 rounded-full bg-accent-emerald flex items-center justify-center shadow-[0_0_12px_rgba(16,185,129,0.4)]">
-                        <span class="material-symbols-outlined text-[14px] text-primary font-bold">check</span>
-                      </div>
-                      <div>
-                        <p class="text-xs font-black text-slate-800 dark:text-white">Pengajuan Dibuat</p>
-                        <p class="text-[10px] text-slate-400 dark:text-white/40 font-bold">{{ new Date(selectedRequest.created_at).toLocaleDateString('id-ID') }} • Oleh {{ selectedRequest.reporter?.full_name }}</p>
-                      </div>
-                    </div>
-                    
-                    <div v-if="selectedRequest.status_lifecycle !== 'Baru'" class="relative pl-8">
-                      <div class="absolute left-0 top-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center shadow-[0_0_12px_rgba(59,130,246,0.4)]">
-                        <span class="material-symbols-outlined text-[14px] text-white font-bold">visibility</span>
-                      </div>
-                      <div>
-                        <p class="text-xs font-black text-blue-500 dark:text-blue-400">{{ selectedRequest.status_lifecycle }}</p>
-                        <p class="text-[10px] text-slate-400 dark:text-white/40 font-bold">{{ new Date(selectedRequest.updated_at).toLocaleDateString('id-ID') }} • Sistem Auto</p>
-                      </div>
-                    </div>
-
-                    <div v-if="selectedRequest.status_lifecycle === 'Baru'" class="relative pl-8">
-                      <div class="absolute left-0 top-1 w-6 h-6 rounded-full bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/20 flex items-center justify-center">
-                        <div class="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-white/20"></div>
-                      </div>
-                      <div>
-                        <p class="text-xs font-black text-slate-300 dark:text-white/30">Langkah Berikutnya</p>
-                        <p class="text-[10px] text-slate-200 dark:text-white/20 font-bold">Menunggu Peninjauan...</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Alasan Penolakan (Jika ada) -->
-                <div v-if="selectedRequest.status_lifecycle === 'Ditolak'" class="bg-white dark:bg-[#111111] border border-red-500/20 rounded-xl p-6 shadow-sm">
-                  <h3 class="text-sm font-black text-red-500 dark:text-red-400 mb-3 flex items-center gap-2">
-                    <span class="material-symbols-outlined text-sm">error</span> Alasan Penolakan
-                  </h3>
-                  <p class="text-xs text-slate-600 dark:text-white/60 leading-relaxed bg-red-50 dark:bg-red-500/5 p-3 rounded-lg border border-red-100 dark:border-red-500/10 italic font-medium">
-                    {{ selectedRequest.alasan_penolakan || 'Tidak ada alasan yang diberikan.' }}
-                  </p>
-                </div>
-
-                <!-- Action Panel (Management Only) -->
-                <div v-if="['Super Admin', 'Admin', 'Editor'].includes(authStore.user?.role)" class="bg-white dark:bg-[#111111] border border-slate-200 dark:border-gray-800 rounded-xl p-6 shadow-sm">
-                  <h3 class="text-sm font-black text-slate-800 dark:text-white mb-4">Manajemen Status</h3>
-                  <div class="grid grid-cols-1 gap-2">
-                    <button 
-                      v-for="status in ['Baru', 'Sedang Ditinjau', 'Sedang Dipertimbangkan', 'Sedang Dikembangkan', 'Selesai']" 
-                      :key="status"
-                      @click="updateStatus(selectedRequest.id, status)"
-                      class="w-full px-4 py-2 rounded-lg text-xs font-black transition-all text-left flex items-center justify-between group"
-                      :class="selectedRequest.status_lifecycle === status 
-                        ? 'bg-accent-emerald text-[#032A28]' 
-                        : (status === 'Baru' 
-                        ? 'bg-gray-600/10 text-gray-600 dark:bg-gray-400/10 dark:text-gray-400' 
-                        : 'bg-slate-50 dark:bg-white/5 text-slate-500 dark:text-white/60 hover:bg-slate-100 dark:hover:bg-white/10')"
-                    >
-                      {{ status }}
-                      <span v-if="selectedRequest.status_lifecycle === status" class="material-symbols-outlined text-sm">check_circle</span>
-                    </button>
-                    <button 
-                      @click="updateStatus(selectedRequest.id, 'Ditolak')"
-                      class="w-full px-4 py-2 rounded-lg text-xs font-black transition-all text-left flex items-center justify-between mt-2 bg-red-50 dark:bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white"
-                    >
-                      Tolak / Arsip
-                      <span class="material-symbols-outlined text-sm">cancel</span>
-                    </button>
-                    
-                    <button 
-                      @click="deleteRequest(selectedRequest.id)"
-                      class="w-full px-4 py-2 rounded-lg text-xs font-black transition-all text-left flex items-center justify-between mt-4 border border-red-200 dark:border-red-500/20 text-red-400 dark:text-red-500/60 hover:bg-red-500 hover:text-white"
-                    >
-                      Hapus Permanen
-                      <span class="material-symbols-outlined text-sm">delete</span>
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

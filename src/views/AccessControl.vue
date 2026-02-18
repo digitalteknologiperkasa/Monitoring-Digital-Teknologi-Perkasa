@@ -1,7 +1,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase'
+import { useAuthStore } from '../stores/auth'
 
+const authStore = useAuthStore()
 const searchQuery = ref('')
 const roles = ref([])
 const modules = ref([])
@@ -50,9 +52,10 @@ const fetchCurrentUser = async () => {
 const fetchAccessData = async () => {
   loading.value = true
   try {
+    const projectId = authStore.user?.project_id || 1
     const [rolesRes, componentsRes, permsRes] = await Promise.all([
       supabase.from('access_roles').select('*').order('role_code'),
-      supabase.from('app_components').select('*').order('name'),
+      supabase.from('app_components').select('*').eq('project_id', projectId).order('name'),
       supabase.from('access_permissions').select('*')
     ])
 

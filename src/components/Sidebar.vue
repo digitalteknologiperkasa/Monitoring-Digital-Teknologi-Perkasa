@@ -1,17 +1,26 @@
 <script setup>
 import { useRoute } from 'vue-router'
+import { computed } from 'vue'
 
 const props = defineProps({
   isSidebarOpen: Boolean,
   isMobileSidebarOpen: Boolean,
   userProfile: Object,
   projectName: String,
+  projectDescription: String,
   menuItems: Array,
   adminItems: Array
 })
 
 const emit = defineEmits(['logout', 'toggleSidebar', 'toggleMobileSidebar'])
 const route = useRoute()
+
+const truncatedDescription = computed(() => {
+  const desc = props.projectDescription || 'DIGITAL PLATFORM'
+  const words = desc.split(' ')
+  if (words.length <= 3) return desc
+  return words.slice(0, 3).join(' ') + '....'
+})
 
 const handleNavClick = () => {
   if (window.innerWidth < 1024) { // lg breakpoint
@@ -41,7 +50,9 @@ const handleLogout = () => {
         </div>
         <div v-if="isSidebarOpen" class="flex flex-col overflow-hidden">
           <span class="text-sm font-bold leading-tight text-slate-900 dark:text-white truncate">{{ projectName }}</span>
-          <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium tracking-wide">DIGITAL PLATFORM</span>
+          <router-link to="/settings" class="hover:underline">
+            <span class="text-[8px] text-emerald-600 dark:text-emerald-400 font-medium tracking-wide" :title="projectDescription || 'DIGITAL PLATFORM'">{{ truncatedDescription }}</span>
+          </router-link>
         </div>
       </div>
       

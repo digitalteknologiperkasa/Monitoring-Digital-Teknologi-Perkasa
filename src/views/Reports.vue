@@ -56,11 +56,11 @@ const monthlyComparison = ref([
             Fitur Analisis & Laporan mendalam sedang dalam tahap pengembangan untuk memberikan wawasan yang lebih baik bagi sistem Anda.
           </p>
           <div class="flex gap-3">
-            <div class="px-4 py-2 rounded-full bg-slate-100 dark:bg-gray-800 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-              Q3 2024
-            </div>
+            <!-- <div class="px-4 py-2 rounded-full bg-slate-100 dark:bg-gray-800 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              
+            </div> -->
             <div class="px-4 py-2 rounded-full bg-emerald-500 text-[10px] font-bold text-white uppercase tracking-widest animate-pulse">
-              In Progress
+              On Progress
             </div>
           </div>
         </div>

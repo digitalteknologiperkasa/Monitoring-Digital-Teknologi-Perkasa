@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/auth'
 
@@ -122,7 +122,7 @@ const fetchModules = async () => {
     const { data, error } = await supabase
       .from('app_components')
       .select('id, name')
-      // .eq('project_id', projectId) // Removed to match AccessControl.vue behavior
+      .eq('project_id', projectId) // Restored strict filtering
       .order('name')
     
     if (error) throw error
@@ -286,6 +286,14 @@ onMounted(() => {
   fetchDefaultProject()
   fetchVersions()
   fetchModules()
+})
+
+watch(() => authStore.user, (newUser) => {
+  if (newUser) {
+    fetchDefaultProject()
+    fetchVersions()
+    fetchModules()
+  }
 })
 
 const filteredVersions = computed(() => {

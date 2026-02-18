@@ -92,7 +92,8 @@ const fetchData = async () => {
 
     // 1. Fetch Logs Stats
     let logsUrl = '/logs?select=id,priority,status,created_at,reporter_id'
-    if (!isSuperAdmin) logsUrl += `&project_id=eq.${projectId}`
+    // Strict filtering: Always filter by project_id regardless of role
+    logsUrl += `&project_id=eq.${projectId}`
     const { data: logsData } = await axios.get(logsUrl)
     
     if (logsData) {
@@ -130,7 +131,7 @@ const fetchData = async () => {
 
     // 2. Fetch Feature Stats
     let featuresUrl = '/feature_requests?select=id,status_lifecycle,urgensi'
-    if (!isSuperAdmin) featuresUrl += `&project_id=eq.${projectId}`
+    featuresUrl += `&project_id=eq.${projectId}`
     const { data: featuresData } = await axios.get(featuresUrl)
     
     if (featuresData) {
@@ -140,7 +141,7 @@ const fetchData = async () => {
 
     // 3. Version Control Stats
     let versionsUrl = '/version_logs?select=version_number,release_date&order=release_date.desc'
-    if (!isSuperAdmin) versionsUrl += `&project_id=eq.${projectId}`
+    versionsUrl += `&project_id=eq.${projectId}`
     const { data: versionsData } = await axios.get(versionsUrl)
     
     if (versionsData && versionsData.length > 0) {
@@ -150,7 +151,7 @@ const fetchData = async () => {
 
     // 4. Access Control Stats
     const [rolesRes, modulesRes] = await Promise.all([
-      supabase.from('access_roles').select('id,role_name,role_code', { count: 'exact' }),
+      supabase.from('access_roles').select('id,role_name,role_code', { count: 'exact' }).eq('project_id', projectId),
       supabase.from('app_components').select('id,name', { count: 'exact' }).eq('project_id', projectId)
     ])
     
@@ -158,13 +159,12 @@ const fetchData = async () => {
     stats.value.activeModules = modulesRes.count || 0
 
     if (rolesRes.data) {
-      // Mocking some data for the progress bars since we don't have user counts per role easily
       const colors = ['blue', 'emerald', 'slate', 'indigo', 'amber']
       rolesSummary.value = rolesRes.data.slice(0, 5).map((r, i) => ({
         name: r.role_name,
         status: r.role_code,
-        count: Math.floor(Math.random() * 10) + 1, // Mock count
-        percentage: Math.floor(Math.random() * 40) + 20, // Mock percentage
+        count: '-', // Placeholder as user count is removed
+        percentage: 0, // Removed percentage
         color: colors[i % colors.length]
       }))
     }
@@ -184,10 +184,46 @@ const fetchData = async () => {
     })
     severityStats.value = sev
 
-    // 6. Recent Activities (Discussions)
-    const { data: discData } = await axios.get('/discussion_forum?select=*,user:profiles(full_name,avatar_url)&order=created_at.desc&limit=10')
-    if (discData) {
-      recentActivities.value = discData.map(d => ({
+    // 6. Recent Activities (Discussions) - Filtered by Project
+    // Fetch larger batch to allow for filtering
+    const { data: discData } = await axios.get('/discussion_forum?select=*,user:profiles(full_name,avatar_url)&order=created_at.desc&limit=50')
+    
+    if (discData && discData.length > 0) {
+      // 1. Identify parent IDs by type
+      const logIds = [...new Set(discData.filter(d => d.parent_type === 'LOG').map(d => d.parent_id))]
+      const featureIds = [...new Set(discData.filter(d => d.parent_type === 'FEATURE').map(d => d.parent_id))]
+      
+      let validLogIds = []
+      let validFeatureIds = []
+
+      // 2. Check which parents belong to current project
+      if (logIds.length > 0) {
+        try {
+          const { data: logs } = await axios.get(`/logs?id=in.(${logIds.join(',')})&project_id=eq.${projectId}&select=id`)
+          if (logs) validLogIds = logs.map(l => l.id)
+        } catch (e) {
+          console.error('Error verifying logs project:', e)
+        }
+      }
+
+      if (featureIds.length > 0) {
+        try {
+          const { data: features } = await axios.get(`/feature_requests?id=in.(${featureIds.join(',')})&project_id=eq.${projectId}&select=id`)
+          if (features) validFeatureIds = features.map(f => f.id)
+        } catch (e) {
+          console.error('Error verifying features project:', e)
+        }
+      }
+
+      // 3. Filter discussions based on valid parents
+      const filteredDiscussions = discData.filter(d => {
+        if (d.parent_type === 'LOG') return validLogIds.includes(d.parent_id)
+        if (d.parent_type === 'FEATURE') return validFeatureIds.includes(d.parent_id)
+        return false
+      })
+
+      // 4. Map to display format (limit to 10)
+      recentActivities.value = filteredDiscussions.slice(0, 10).map(d => ({
         user: d.user?.full_name || 'User',
         action: `mengomentari di forum ${d.parent_type}`,
         time: formatTime(d.created_at),
@@ -375,10 +411,11 @@ onMounted(() => {
               <div v-for="role in rolesSummary" :key="role.name">
                 <div class="flex items-center justify-between text-[10px] font-bold mb-1">
                   <span class="text-slate-500 uppercase">{{ role.name }}</span>
-                  <span class="text-slate-700 dark:text-slate-300">{{ role.count }} Users ({{ role.percentage }}%)</span>
+                  <span class="text-slate-700 dark:text-slate-300"></span>
                 </div>
-                <div class="w-full bg-slate-100 dark:bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                  <div :class="`bg-${role.color}-500`" class="h-full rounded-full transition-all" :style="{ width: role.percentage + '%' }"></div>
+                <!-- Removed percentage bar as requested -->
+                <div class="w-full bg-slate-100 dark:bg-gray-800 h-1.5 rounded-full overflow-hidden opacity-30">
+                  <div :class="`bg-${role.color}-500`" class="h-full rounded-full transition-all" style="width: 100%"></div>
                 </div>
               </div>
             </div>
