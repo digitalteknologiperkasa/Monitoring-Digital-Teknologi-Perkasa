@@ -359,71 +359,63 @@ const saveRequest = async () => {
 
     console.log('Sending feature request explicit payload via axios:', payload)
 
-    // 3. Eksekusi insert menggunakan RPC (Stored Procedure) untuk bypass potensi masalah RLS
-    console.log('Attempting insert via RPC submit_feature_request...')
+    // 3. Eksekusi insert menggunakan Axios (Primary Method - Works Locally)
+    console.log('Attempting insert via Axios...')
     
-    // Siapkan parameter untuk RPC
-    const rpcParams = {
-      p_project_id: payload.project_id,
-      p_component_id: payload.component_id,
-      p_reporter_id: payload.reporter_id,
-      p_judul_request: payload.judul_request,
-      p_kategori_dev: payload.kategori_dev,
-      p_deskripsi_masukan: payload.deskripsi_masukan,
-      p_urgensi: payload.urgensi,
-      p_status_perwakilan: payload.status_perwakilan,
-      p_kode_pesantren: payload.kode_pesantren,
-      p_unit_yayasan: payload.unit_yayasan,
-      p_kategori_modul: payload.kategori_modul,
-      p_masalah: payload.masalah,
-      p_usulan: payload.usulan,
-      p_dampak: payload.dampak,
-      p_attachment_wa: payload.attachment_wa,
-      p_attachment_lain: payload.attachment_lain
+    const config = { 
+      timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation' // Minta data yang di-insert dikembalikan
+      }
     }
 
-    const insertPromise = supabase
-      .rpc('submit_feature_request', rpcParams)
-
-    // Timeout 15 detik
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Force Timeout 15s: RPC request hung')), 15000)
-    )
-
-    const { data, error } = await Promise.race([insertPromise, timeoutPromise])
-
-    if (error) {
-      console.error('RPC Error:', error)
-      // Fallback ke insert biasa jika RPC gagal (misal fungsi belum dibuat)
-      console.log('RPC failed, falling back to direct insert...')
-      const { data: fallbackData, error: fallbackError } = await supabase
+    try {
+      const { data } = await axios.post('/feature_requests', payload, config)
+      console.log('Axios Insert success:', data)
+      
+      // Reset loading state
+      modalLoading.value = false
+      showAddModal.value = false
+      resetForm()
+      fetchRequests()
+      alert('Request fitur berhasil dikirim!')
+      return // Success exit
+    } catch (axiosError) {
+      console.error('Axios insert failed, trying Supabase SDK fallback...', axiosError)
+      
+      // 4. Fallback ke Supabase SDK jika Axios gagal
+      const insertPromise = supabase
         .from('feature_requests')
         .insert(payload)
         .select()
         .single()
-        
-      if (fallbackError) throw fallbackError
-      console.log('Fallback Insert success:', fallbackData)
-    } else {
-      console.log('RPC Insert success:', data)
-    }
 
-    // Reset loading state
-    modalLoading.value = false
-    showAddModal.value = false
-    resetForm()
-    
-    fetchRequests()
-    
-    alert('Request fitur berhasil dikirim!')
+      // Timeout 15 detik untuk fallback
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Force Timeout 15s: Supabase SDK fallback hung')), 15000)
+      )
+
+      const { data, error } = await Promise.race([insertPromise, timeoutPromise])
+
+      if (error) throw error
+      console.log('Supabase SDK Fallback success:', data)
+
+      // Reset loading state
+      modalLoading.value = false
+      showAddModal.value = false
+      resetForm()
+      fetchRequests()
+      alert('Request fitur berhasil dikirim (via Fallback)!')
+    }
   } catch (error) {
     console.error('Final catch error saving request:', error)
     modalLoading.value = false
     
     let errorMsg = 'Terjadi kesalahan pada server database'
     
-    if (error.message?.includes('Timeout')) {
-      errorMsg = 'Request timed out. Mohon jalankan script SQL "fix_feature_insert_rpc.sql" di Supabase Dashboard.'
+    if (error.message?.includes('Timeout') || error.code === 'ECONNABORTED') {
+      errorMsg = 'Request timed out. Mohon jalankan script SQL "fix_feature_requests_all.sql" di Supabase Dashboard untuk memperbaiki izin akses.'
     } else if (error.message) {
       errorMsg = error.message
     } else if (error.details) {
