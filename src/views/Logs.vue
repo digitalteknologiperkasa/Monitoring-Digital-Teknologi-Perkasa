@@ -333,15 +333,27 @@ const fetchDefaultProject = async () => {
 }
 
 const getNextNoLap = async () => {
+  console.log('getNextNoLap started')
   try {
     const projectId = logForm.value.project_id || defaultProjectId.value
+    if (!projectId) {
+      console.warn('Project ID is missing for getNextNoLap, defaulting to 101')
+      return 101
+    }
+    console.log('Fetching next no_lap for project:', projectId)
+    
+    // Explicitly select only no_lap to minimize data transfer
     const response = await axios.get(`/logs?project_id=eq.${projectId}&select=no_lap&order=no_lap.desc&limit=1`)
+    
+    console.log('getNextNoLap response:', response.data)
     if (response.data && response.data.length > 0) {
-      return (response.data[0].no_lap || 100) + 1
+      const lastNoLap = response.data[0].no_lap
+      return (typeof lastNoLap === 'number' ? lastNoLap : 100) + 1
     }
     return 101
   } catch (error) {
     console.error('Error fetching next no_lap:', error)
+    // Return a safe default if fetch fails, but log it clearly
     return 101
   }
 }
@@ -509,23 +521,31 @@ const saveNewLog = async (formData) => {
   try {
     // Get next no_lap from DB
     const nextNoLap = await getNextNoLap()
+    console.log('Next No Lap:', nextNoLap)
+
     const { dbPriority, dbStatus } = mapToDbValues(formData)
     
+    // Ensure date is in ISO format
+    let formattedDate = formData.found_date
+    if (formattedDate && !formattedDate.includes('Z')) {
+      formattedDate = new Date(formattedDate).toISOString()
+    }
+
     // Prepare complete data object according to schema
     const dataToInsert = {
       project_id: parseInt(formData.project_id || defaultProjectId.value),
       no_lap: parseInt(nextNoLap),
       module: formData.module,
       version: formData.version,
-      found_date: formData.found_date,
+      found_date: formattedDate,
       priority: dbPriority,
       status: dbStatus,
       reporter_id: formData.reporter_id || currentUser.value?.id || null,
       actual_behavior: formData.actual_behavior,
       expected_behavior: formData.expected_behavior,
       severity_details: formData.severity_details,
-      attachment_link: formData.attachment_link || null,
-      updated_at: new Date().toISOString()
+      attachment_link: formData.attachment_link || null
+      // created_at and updated_at are handled by DB defaults and triggers
     }
     
     console.log('Sending Payload:', dataToInsert)
@@ -535,6 +555,8 @@ const saveNewLog = async (formData) => {
       headers: { 'Prefer': 'return=representation' }
     })
     
+    console.log('Save response:', response)
+
     await fetchLogs()
     
     navigateTo('all')
@@ -1153,8 +1175,8 @@ onMounted(async () => {
               v-model="sortBy"
               class="w-full h-full pl-10 pr-8 bg-white dark:bg-[#1e1e1e] border border-gray-200 dark:border-gray-800 rounded-lg text-sm font-semibold text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-emerald-500/20 appearance-none transition-all cursor-pointer outline-none"
             >
-              <option value="newest">Newest First</option>
-              <option value="oldest">Oldest First</option>
+              <option value="newest">Terbaru</option>
+              <option value="oldest">Terlama</option>
             </select>
             <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-gray-500 pointer-events-none">sort</span>
             <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[18px] text-gray-400 pointer-events-none">expand_more</span>

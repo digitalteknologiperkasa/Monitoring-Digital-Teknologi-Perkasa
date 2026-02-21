@@ -1,10 +1,12 @@
 import axios from 'axios'
+import { supabase } from './supabase'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const axiosInstance = axios.create({
   baseURL: `${supabaseUrl}/rest/v1`,
+  timeout: 10000, // 10 seconds timeout
   headers: {
     'apikey': supabaseAnonKey,
     'Authorization': `Bearer ${supabaseAnonKey}`,
@@ -16,7 +18,6 @@ const axiosInstance = axios.create({
 // Interceptor untuk menangani token user jika ada session
 axiosInstance.interceptors.request.use(async (config) => {
   try {
-    const { supabase } = await import('./supabase')
     const { data: { session } } = await supabase.auth.getSession()
     
     if (session?.access_token) {

@@ -405,7 +405,7 @@ onMounted(() => {
                 <span class="material-symbols-outlined text-blue-500">security</span>
                 Team Access Control Summary
               </h3>
-              <router-link to="/team-management" class="text-[10px] font-black bg-blue-100 text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-200 transition-colors">ADD NEW ROLE</router-link>
+              <router-link to="/access-control" class="text-[10px] font-black bg-blue-100 text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-200 transition-colors">ADD NEW ROLE</router-link>
             </div>
             <div class="space-y-4">
               <div v-for="role in rolesSummary" :key="role.name">
