@@ -366,49 +366,49 @@ const saveRequest = async () => {
 
     console.log('Sending feature request explicit payload via axios:', payload)
 
-    // 3. Eksekusi insert menggunakan Axios (Primary Method - Works Locally)
-    console.log('Attempting insert via Axios...')
+    // 3. Eksekusi insert menggunakan Supabase SDK (LEBIH STABIL DARI AXIOS UNTUK POST)
+    console.log('Attempting insert via Supabase SDK (Primary)...')
     
-    const config = { 
-      timeout: 10000,
-      headers: {
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation' // Minta data yang di-insert dikembalikan
-      }
-    }
+    // Kita gunakan Supabase SDK sebagai metode UTAMA karena Axios sering bermasalah dengan CORS/Headers di production
+    const insertPromise = supabase
+      .from('feature_requests')
+      .insert(payload)
+      .select()
+      .single()
+
+    // Timeout 10 detik
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Force Timeout 10s: Supabase SDK request hung')), 10000)
+    )
 
     try {
-      const { data } = await axios.post('/feature_requests', payload, config)
-      console.log('Axios Insert success:', data)
+      const { data, error } = await Promise.race([insertPromise, timeoutPromise])
+
+      if (error) throw error
       
+      console.log('Supabase SDK Insert success:', data)
+
       // Reset loading state
       modalLoading.value = false
       showAddModal.value = false
       resetForm()
       fetchRequests()
       alert('Request fitur berhasil dikirim!')
-      return // Success exit
-    } catch (axiosError) {
-      console.error('Axios insert failed, trying Supabase SDK fallback...', axiosError)
+    } catch (sdkError) {
+      console.error('Supabase SDK insert failed, trying Axios fallback...', sdkError)
       
-      // 4. Fallback ke Supabase SDK jika Axios gagal
-      const insertPromise = supabase
-        .from('feature_requests')
-        .insert(payload)
-        .select()
-        .single()
-
-      // Timeout 15 detik untuk fallback
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Force Timeout 15s: Supabase SDK fallback hung')), 15000)
-      )
-
-      const { data, error } = await Promise.race([insertPromise, timeoutPromise])
-
-      if (error) throw error
-      console.log('Supabase SDK Fallback success:', data)
-
-      // Reset loading state
+      // 4. Fallback ke Axios jika SDK gagal (jarang terjadi, tapi untuk safety)
+      const config = { 
+        timeout: 10000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      }
+      
+      const { data } = await axios.post('/feature_requests', payload, config)
+      console.log('Axios Fallback success:', data)
+      
       modalLoading.value = false
       showAddModal.value = false
       resetForm()
