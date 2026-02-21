@@ -361,7 +361,16 @@ const saveRequest = async () => {
 
     // 3. Eksekusi insert menggunakan axios
     const config = { timeout: 10000 }
-    const response = await axios.post('/feature_requests', payload, config)
+    
+    // Add Promise.race to force timeout if axios hangs
+    const requestPromise = axios.post('/feature_requests', payload, config)
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Force Timeout 10s: Network request hung')), 10000)
+    )
+    
+    console.log('Awaiting axios.post response...')
+    const response = await Promise.race([requestPromise, timeoutPromise])
+    
     console.log('Insert success response:', response)
 
     // Reset loading state before showing alert to prevent "stuck spinning" button

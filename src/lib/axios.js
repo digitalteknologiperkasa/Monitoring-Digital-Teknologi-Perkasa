@@ -18,7 +18,9 @@ const axiosInstance = axios.create({
 // Interceptor untuk menangani token user jika ada session
 axiosInstance.interceptors.request.use(async (config) => {
   try {
+    console.log('Axios Interceptor: Getting session...')
     const { data: { session } } = await supabase.auth.getSession()
+    console.log('Axios Interceptor: Session retrieved', !!session)
     
     if (session?.access_token) {
       config.headers['Authorization'] = `Bearer ${session.access_token}`
