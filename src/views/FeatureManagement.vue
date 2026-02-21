@@ -370,11 +370,10 @@ const saveRequest = async () => {
     console.log('Attempting insert via Supabase SDK (Primary)...')
     
     // Kita gunakan Supabase SDK sebagai metode UTAMA karena Axios sering bermasalah dengan CORS/Headers di production
+    // Hapus .select() agar lebih ringan dan mengurangi potensi RLS read blocking
     const insertPromise = supabase
       .from('feature_requests')
       .insert(payload)
-      .select()
-      .single()
 
     // Timeout 10 detik
     const timeoutPromise = new Promise((_, reject) => 
@@ -382,11 +381,12 @@ const saveRequest = async () => {
     )
 
     try {
-      const { data, error } = await Promise.race([insertPromise, timeoutPromise])
+      const result = await Promise.race([insertPromise, timeoutPromise])
+      const { error } = result || {}
 
       if (error) throw error
       
-      console.log('Supabase SDK Insert success:', data)
+      console.log('Supabase SDK Insert success (no data returned for speed)')
 
       // Reset loading state
       modalLoading.value = false
