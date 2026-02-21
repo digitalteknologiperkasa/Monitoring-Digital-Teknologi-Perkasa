@@ -359,21 +359,27 @@ const saveRequest = async () => {
 
     console.log('Sending feature request explicit payload via axios:', payload)
 
-    // 3. Eksekusi insert menggunakan axios
-    const config = { timeout: 10000 }
+    // 3. Eksekusi insert menggunakan Supabase SDK (lebih stabil untuk auth/headers)
+    console.log('Attempting insert via Supabase SDK...')
     
-    // Add Promise.race to force timeout if axios hangs
-    const requestPromise = axios.post('/feature_requests', payload, config)
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Force Timeout 10s: Network request hung')), 10000)
-    )
-    
-    console.log('Awaiting axios.post response...')
-    const response = await Promise.race([requestPromise, timeoutPromise])
-    
-    console.log('Insert success response:', response)
+    // Wrap Supabase call in a timeout promise
+    const insertPromise = supabase
+      .from('feature_requests')
+      .insert(payload)
+      .select()
+      .single()
 
-    // Reset loading state before showing alert to prevent "stuck spinning" button
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Force Timeout 10s: Supabase SDK request hung')), 10000)
+    )
+
+    const { data, error } = await Promise.race([insertPromise, timeoutPromise])
+
+    if (error) throw error
+    
+    console.log('Insert success response:', data)
+
+    // Reset loading state before showing alert
     modalLoading.value = false
     showAddModal.value = false
     resetForm()
@@ -384,18 +390,16 @@ const saveRequest = async () => {
     alert('Request fitur berhasil dikirim!')
   } catch (error) {
     console.error('Final catch error saving request:', error)
-    modalLoading.value = false // Ensure it's reset on error too
+    modalLoading.value = false
     
     let errorMsg = 'Terjadi kesalahan pada server database'
     
-    if (error.code === 'ECONNABORTED') {
-      errorMsg = 'Request timed out (Check RLS policies)'
-    } else if (error.response) {
-      // Axios error with response
-      console.error('Error response data:', error.response.data)
-      errorMsg = error.response.data.message || error.response.data.details || JSON.stringify(error.response.data)
+    if (error.message?.includes('Timeout')) {
+      errorMsg = 'Request timed out. Koneksi ke server lambat atau terblokir.'
     } else if (error.message) {
       errorMsg = error.message
+    } else if (error.details) {
+      errorMsg = error.details
     }
     
     alert('Gagal menyimpan request: ' + errorMsg)
