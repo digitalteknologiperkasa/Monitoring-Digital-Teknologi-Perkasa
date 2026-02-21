@@ -366,19 +366,19 @@ const saveRequest = async () => {
 
     console.log('Sending feature request explicit payload via axios:', payload)
 
-    // 3. Eksekusi insert menggunakan Supabase SDK (LEBIH STABIL DARI AXIOS UNTUK POST)
+    // 3. Eksekusi insert menggunakan Supabase SDK (Primary)
     console.log('Attempting insert via Supabase SDK (Primary)...')
     
-    // Kita gunakan Supabase SDK sebagai metode UTAMA karena Axios sering bermasalah dengan CORS/Headers di production
+    // Kita gunakan Supabase SDK sebagai metode UTAMA
     const insertPromise = supabase
       .from('feature_requests')
       .insert(payload)
       .select()
       .single()
 
-    // Timeout 10 detik
+    // Timeout 7 detik (kurangi agar cepat switch ke fallback)
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Force Timeout 10s: Supabase SDK request hung')), 10000)
+      setTimeout(() => reject(new Error('Force Timeout 7s: Supabase SDK request hung')), 7000)
     )
 
     try {
@@ -395,25 +395,64 @@ const saveRequest = async () => {
       fetchRequests()
       alert('Request fitur berhasil dikirim!')
     } catch (sdkError) {
-      console.error('Supabase SDK insert failed, trying Axios fallback...', sdkError)
+      console.error('Supabase SDK insert failed, trying RPC fallback...', sdkError)
       
-      // 4. Fallback ke Axios jika SDK gagal (jarang terjadi, tapi untuk safety)
-      const config = { 
-        timeout: 10000,
-        headers: {
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
+      // 4. Fallback ke RPC Function (Server Side Bypass RLS)
+      try {
+        console.log('Attempting insert via RPC submit_feature_request...')
+        
+        const rpcParams = {
+          p_project_id: payload.project_id,
+          p_component_id: payload.component_id,
+          p_reporter_id: payload.reporter_id,
+          p_judul_request: payload.judul_request,
+          p_kategori_dev: payload.kategori_dev,
+          p_deskripsi_masukan: payload.deskripsi_masukan,
+          p_urgensi: payload.urgensi,
+          p_status_perwakilan: payload.status_perwakilan,
+          p_kode_pesantren: payload.kode_pesantren,
+          p_unit_yayasan: payload.unit_yayasan,
+          p_kategori_modul: payload.kategori_modul,
+          p_masalah: payload.masalah,
+          p_usulan: payload.usulan,
+          p_dampak: payload.dampak,
+          p_attachment_wa: payload.attachment_wa,
+          p_attachment_lain: payload.attachment_lain
         }
+
+        const { data: rpcData, error: rpcError } = await supabase.rpc('submit_feature_request', rpcParams)
+        
+        if (rpcError) throw rpcError
+        
+        console.log('RPC Insert success:', rpcData)
+        
+        modalLoading.value = false
+        showAddModal.value = false
+        resetForm()
+        fetchRequests()
+        alert('Request fitur berhasil dikirim (via RPC Fallback)!')
+        return
+      } catch (rpcErr) {
+        console.error('RPC fallback failed, trying Axios fallback...', rpcErr)
+        
+        // 5. Fallback Terakhir ke Axios
+        const config = { 
+          timeout: 10000,
+          headers: {
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          }
+        }
+        
+        const { data } = await axios.post('/feature_requests', payload, config)
+        console.log('Axios Fallback success:', data)
+        
+        modalLoading.value = false
+        showAddModal.value = false
+        resetForm()
+        fetchRequests()
+        alert('Request fitur berhasil dikirim (via Axios Fallback)!')
       }
-      
-      const { data } = await axios.post('/feature_requests', payload, config)
-      console.log('Axios Fallback success:', data)
-      
-      modalLoading.value = false
-      showAddModal.value = false
-      resetForm()
-      fetchRequests()
-      alert('Request fitur berhasil dikirim (via Fallback)!')
     }
   } catch (error) {
     console.error('Final catch error saving request:', error)
@@ -422,7 +461,7 @@ const saveRequest = async () => {
     let errorMsg = 'Terjadi kesalahan pada server database'
     
     if (error.message?.includes('Timeout') || error.code === 'ECONNABORTED') {
-      errorMsg = 'Request timed out. Mohon jalankan script SQL "fix_feature_requests_all.sql" di Supabase Dashboard untuk memperbaiki izin akses.'
+      errorMsg = 'Request timed out. Mohon jalankan script SQL "fix_feature_rpc_v2.sql" di Supabase Dashboard.'
     } else if (error.message) {
       errorMsg = error.message
     } else if (error.details) {
