@@ -319,14 +319,21 @@ const fetchRequests = async () => {
 }
 
 const saveRequest = async () => {
-  if (modalLoading.value) return
-  if (!authStore.user) {
-    alert('Anda harus login untuk mengirim request.')
-    return
-  }
+    if (modalLoading.value) return
+    if (!authStore.user) {
+      alert('Anda harus login untuk mengirim request.')
+      return
+    }
 
-  modalLoading.value = true
-  try {
+    // Strict Role Check (Client Side)
+    const allowedRoles = ['Super Admin', 'Admin', 'Editor']
+    if (!allowedRoles.includes(authStore.user.role)) {
+      alert('Akses Ditolak: Hanya Editor dan Super Admin yang dapat menambahkan fitur baru.')
+      return
+    }
+
+    modalLoading.value = true
+    try {
     // Upload file if selected
     let fileUrl = null
     if (modalFile.value) {
