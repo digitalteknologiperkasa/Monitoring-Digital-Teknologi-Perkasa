@@ -360,7 +360,8 @@ const saveRequest = async () => {
     console.log('Sending feature request explicit payload via axios:', payload)
 
     // 3. Eksekusi insert menggunakan axios
-    const response = await axios.post('/feature_requests', payload)
+    const config = { timeout: 10000 }
+    const response = await axios.post('/feature_requests', payload, config)
     console.log('Insert success response:', response)
 
     // Reset loading state before showing alert to prevent "stuck spinning" button
@@ -378,7 +379,9 @@ const saveRequest = async () => {
     
     let errorMsg = 'Terjadi kesalahan pada server database'
     
-    if (error.response) {
+    if (error.code === 'ECONNABORTED') {
+      errorMsg = 'Request timed out (Check RLS policies)'
+    } else if (error.response) {
       // Axios error with response
       console.error('Error response data:', error.response.data)
       errorMsg = error.response.data.message || error.response.data.details || JSON.stringify(error.response.data)
@@ -413,7 +416,8 @@ const updateStatus = async (id, newStatus) => {
       updateData.alasan_penolakan = rejectionReason.value
     }
 
-    await axios.patch(`/feature_requests?id=eq.${id}`, updateData)
+    const config = { timeout: 10000 }
+    await axios.patch(`/feature_requests?id=eq.${id}`, updateData, config)
     
     // Reset rejection state
     if (newStatus === 'Ditolak') {
@@ -440,7 +444,8 @@ const updateStatus = async (id, newStatus) => {
     alert(`Status berhasil diperbarui ke ${newStatus}`)
   } catch (error) {
     console.error('Error updating status:', error)
-    alert('Gagal memperbarui status: ' + error.message)
+    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+    alert('Gagal memperbarui status: ' + msg)
   }
 }
 
@@ -465,7 +470,8 @@ const promoteToBacklog = async (requestId) => {
       updated_at: new Date().toISOString()
     }
 
-    await axios.post('/feature_backlog', backlogPayload)
+    const config = { timeout: 10000 }
+    await axios.post('/feature_backlog', backlogPayload, config)
   } catch (error) {
     console.error('Error promoting to backlog:', error)
   }
@@ -473,10 +479,11 @@ const promoteToBacklog = async (requestId) => {
 
 const syncBacklogFinish = async (requestId) => {
   try {
+    const config = { timeout: 10000 }
     await axios.patch(`/feature_backlog?discussion_reference=eq.${requestId}`, { 
       stage: 'Launched',
       updated_at: new Date().toISOString()
-    })
+    }, config)
   } catch (error) {
     console.error('Error syncing backlog finish:', error)
   }
@@ -490,14 +497,16 @@ const deleteRequest = async (id) => {
   if (!confirm('Apakah Anda yakin ingin menghapus pengajuan ini?')) return
   
   try {
-    await axios.delete(`/feature_requests?id=eq.${id}`)
+    const config = { timeout: 10000 }
+    await axios.delete(`/feature_requests?id=eq.${id}`, config)
     
     await fetchRequests()
     showDetailModal.value = false
     alert('Pengajuan berhasil dihapus')
   } catch (error) {
     console.error('Error deleting request:', error)
-    alert('Gagal menghapus: ' + error.message)
+    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+    alert('Gagal menghapus: ' + msg)
   }
 }
 
