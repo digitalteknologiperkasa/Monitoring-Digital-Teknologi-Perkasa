@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import axios from '../lib/axios'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/auth'
 
@@ -53,21 +54,23 @@ const fetchAccessData = async () => {
   loading.value = true
   try {
     const projectId = authStore.user?.project_id || 1
+    
+    // Gunakan axios untuk menghindari blocking issue pada supabase client jika RLS bermasalah
     const [rolesRes, componentsRes, permsRes] = await Promise.all([
-      supabase.from('access_roles').select('*').order('role_code'),
-      supabase.from('app_components').select('*').eq('project_id', projectId).order('name'),
-      supabase.from('access_permissions').select('*')
+      axios.get('/access_roles?order=role_code.asc'),
+      axios.get(`/app_components?project_id=eq.${projectId}&order=name.asc`),
+      axios.get('/access_permissions')
     ])
 
-    if (rolesRes.error) throw rolesRes.error
-    if (componentsRes.error) throw componentsRes.error
-    if (permsRes.error) throw permsRes.error
+    const rolesData = rolesRes.data
+    const componentsData = componentsRes.data
+    const permsData = permsRes.data
 
     const colors = ['blue', 'purple', 'orange', 'teal', 'slate', 'red', 'green', 'indigo']
     
     // Natural Sort for Role Codes (e.g., R9 comes before R11)
     const naturalSorter = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-    const sortedRoles = rolesRes.data.sort((a, b) => 
+    const sortedRoles = rolesData.sort((a, b) => 
       naturalSorter.compare(a.role_code || '', b.role_code || '')
     )
 
@@ -78,9 +81,9 @@ const fetchAccessData = async () => {
       color: colors[i % colors.length]
     }))
 
-    permissions.value = permsRes.data
+    permissions.value = permsData
 
-    modules.value = componentsRes.data.map(comp => {
+    modules.value = componentsData.map(comp => {
       const compPerms = {}
       roles.value.forEach(role => {
         const perm = permissions.value.find(p => p.role_id === role.id && p.component_id === comp.id)
@@ -96,7 +99,8 @@ const fetchAccessData = async () => {
     })
 
   } catch (error) {
-    console.error('Error fetching access matrix:', error.message)
+    console.error('Error fetching access matrix:', error)
+    // alert('Gagal memuat data akses: ' + (error.message || 'Unknown error'))
   } finally {
     loading.value = false
   }
@@ -126,7 +130,9 @@ const openEditModal = (mod, roleId) => {
 
 const savePermissions = async () => {
   modalLoading.value = true
+  console.log('Starting savePermissions...')
   try {
+    const config = { timeout: 10000 }
     // Exclude UI-only fields (roleName, moduleName) before sending to Supabase
     const { roleId, moduleId, roleName, moduleName, ...perms } = editForm.value
     
@@ -134,29 +140,27 @@ const savePermissions = async () => {
     const existing = permissions.value.find(p => p.role_id === roleId && p.component_id === moduleId)
     
     if (existing) {
-      const { error } = await supabase
-        .from('access_permissions')
-        .update({
-          ...perms,
-          updated_at: new Date().toISOString()
-        })
-        .match({ role_id: roleId, component_id: moduleId })
-      if (error) throw error
+      console.log('Patching permissions')
+      await axios.patch(`/access_permissions?role_id=eq.${roleId}&component_id=eq.${moduleId}`, {
+        ...perms,
+        updated_at: new Date().toISOString()
+      }, config)
     } else {
-      const { error } = await supabase
-        .from('access_permissions')
-        .insert([{ 
-          role_id: roleId, 
-          component_id: moduleId, 
-          ...perms 
-        }])
-      if (error) throw error
+      console.log('Posting new permissions')
+      await axios.post('/access_permissions', { 
+        role_id: roleId, 
+        component_id: moduleId, 
+        ...perms 
+      }, config)
     }
+    console.log('Permissions saved successfully')
 
     showEditModal.value = false
-    fetchAccessData()
+    await fetchAccessData()
   } catch (error) {
-    alert('Error saving: ' + error.message)
+    console.error('Error saving permissions:', error)
+    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+    alert('Error saving: ' + msg)
   } finally {
     modalLoading.value = false
   }
@@ -168,24 +172,26 @@ const handleAddRole = async () => {
     return
   }
   modalLoading.value = true
+  console.log('Starting handleAddRole...')
   try {
+    const config = { timeout: 10000 }
     if (editingRoleId.value) {
-      const { error } = await supabase
-        .from('access_roles')
-        .update(roleForm.value)
-        .eq('id', editingRoleId.value)
-      if (error) throw error
+      await axios.patch(`/access_roles?id=eq.${editingRoleId.value}`, roleForm.value, config)
     } else {
-      const { error } = await supabase
-        .from('access_roles')
-        .insert([roleForm.value])
-      if (error) throw error
+      await axios.post('/access_roles', roleForm.value, config)
     }
+    console.log('Role saved successfully')
     showRoleModal.value = false
     editingRoleId.value = null
     roleForm.value = { role_name: '', role_code: '' }
-    fetchAccessData()
-  } catch (error) { alert(error.message) } finally { modalLoading.value = false }
+    await fetchAccessData()
+  } catch (error) { 
+    console.error('Error in handleAddRole:', error)
+    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+    alert('Gagal menyimpan role: ' + msg) 
+  } finally { 
+    modalLoading.value = false 
+  }
 }
 
 const openEditRoleModal = (role) => {
@@ -201,11 +207,19 @@ const handleDeleteRole = async (id) => {
   }
   if (!confirm('Hapus role ini? Seluruh matriks hak akses untuk role ini akan hilang.')) return
   modalLoading.value = true
+  console.log('Starting handleDeleteRole:', id)
   try {
-    const { error } = await supabase.from('access_roles').delete().eq('id', id)
-    if (error) throw error
-    fetchAccessData()
-  } catch (error) { alert(error.message) } finally { modalLoading.value = false }
+    const config = { timeout: 10000 }
+    await axios.delete(`/access_roles?id=eq.${id}`, config)
+    console.log('Role deleted successfully')
+    await fetchAccessData()
+  } catch (error) { 
+    console.error('Error deleting role:', error)
+    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+    alert('Gagal menghapus role: ' + msg) 
+  } finally { 
+    modalLoading.value = false 
+  }
 }
 
 const handleAddModule = async () => {
@@ -214,24 +228,36 @@ const handleAddModule = async () => {
     return
   }
   modalLoading.value = true
+  console.log('Starting handleAddModule...')
   try {
+    const projectId = authStore.user?.project_id || 1
+    const payload = { ...moduleForm.value, project_id: projectId }
+    console.log('Payload:', payload)
+
+    const config = { timeout: 10000 } // Explicit 10s timeout
+
     if (editingModuleId.value) {
-      const { error } = await supabase
-        .from('app_components')
-        .update(moduleForm.value)
-        .eq('id', editingModuleId.value)
-      if (error) throw error
+      console.log('Patching module:', editingModuleId.value)
+      await axios.patch(`/app_components?id=eq.${editingModuleId.value}`, payload, config)
     } else {
-      const { error } = await supabase
-        .from('app_components')
-        .insert([moduleForm.value])
-      if (error) throw error
+      console.log('Posting new module')
+      await axios.post('/app_components', payload, config)
     }
+    console.log('Module saved successfully')
+    
     showModuleModal.value = false
     editingModuleId.value = null
     moduleForm.value = { name: '' }
-    fetchAccessData()
-  } catch (error) { alert(error.message) } finally { modalLoading.value = false }
+    
+    console.log('Refreshing data...')
+    await fetchAccessData()
+  } catch (error) { 
+    console.error('Error in handleAddModule:', error)
+    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+    alert('Gagal menyimpan modul: ' + msg) 
+  } finally { 
+    modalLoading.value = false 
+  }
 }
 
 const openEditModuleModal = (mod) => {
@@ -247,11 +273,19 @@ const handleDeleteModule = async (id) => {
   }
   if (!confirm('Hapus modul ini? Seluruh matriks hak akses untuk modul ini akan hilang.')) return
   modalLoading.value = true
+  console.log('Starting handleDeleteModule:', id)
   try {
-    const { error } = await supabase.from('app_components').delete().eq('id', id)
-    if (error) throw error
-    fetchAccessData()
-  } catch (error) { alert(error.message) } finally { modalLoading.value = false }
+    const config = { timeout: 10000 }
+    await axios.delete(`/app_components?id=eq.${id}`, config)
+    console.log('Module deleted successfully')
+    await fetchAccessData()
+  } catch (error) { 
+    console.error('Error deleting module:', error)
+    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+    alert('Gagal menghapus modul: ' + msg) 
+  } finally { 
+    modalLoading.value = false 
+  }
 }
 
 onMounted(() => {
