@@ -126,7 +126,7 @@ export const useAuthStore = defineStore('auth', {
         console.log('Fetching profile for user ID:', data.user.id);
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
-          .select('role')
+          .select('role, project_id, description')
           .eq('id', data.user.id)
           .single()
 
@@ -136,20 +136,24 @@ export const useAuthStore = defineStore('auth', {
         
         console.log('Fetched profile:', profile);
 
-        let finalRole = profile?.role || 'Viewer' // Default ke 'Viewer' jika tidak ada profil
+        let finalRole = profile?.role || 'Viewer'
         console.log('Initial role:', finalRole);
 
         if (['admin@digitek.com', 'ganjarpranowo@pdi.com'].includes(data.user.email)) {
           finalRole = 'Super Admin'
           console.log('User is Super Admin. Role set to:', finalRole);
-          // Sync balik ke DB jika perlu
           if (profile?.role !== 'Super Admin') {
             console.log('Syncing Super Admin role to DB...');
             await supabase.from('profiles').update({ role: 'Super Admin' }).eq('id', data.user.id)
           }
         }
         
-        this.user = { ...data.user, role: finalRole }
+        this.user = { 
+          ...data.user, 
+          role: finalRole,
+          project_id: profile?.project_id || 1,
+          description: profile?.description
+        }
         console.log('Final user object set in store:', this.user);
       }
 

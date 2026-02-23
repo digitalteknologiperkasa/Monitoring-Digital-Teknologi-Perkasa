@@ -22,6 +22,42 @@ const isEditing = ref(false)
 const openDropdownId = ref(null) // Track which dropdown is open
 const statusOptions = ['Pending QA', 'In Progress', 'Done', 'Rejected']
 
+// Popup State
+const popup = ref({
+  show: false,
+  title: '',
+  message: '',
+  type: 'success', // 'success', 'error', 'warning'
+  confirmCallback: null,
+  confirmText: 'OK',
+  cancelText: 'Batal',
+  showCancel: false
+})
+
+const triggerPopup = (title, message, type = 'success', onConfirm = null, showCancel = false) => {
+  popup.value = {
+    show: true,
+    title,
+    message,
+    type,
+    confirmCallback: onConfirm,
+    confirmText: onConfirm ? 'Ya, Lanjutkan' : 'OK',
+    cancelText: 'Batal',
+    showCancel
+  }
+}
+
+const closePopup = () => {
+  popup.value.show = false
+}
+
+const handlePopupConfirm = () => {
+  if (popup.value.confirmCallback) {
+    popup.value.confirmCallback()
+  }
+  closePopup()
+}
+
 const toggleDropdown = (id) => {
   openDropdownId.value = openDropdownId.value === id ? null : id
 }
@@ -51,9 +87,10 @@ const updateStatus = async (versionId, newStatus) => {
       version.raw.status = newStatus
     }
     openDropdownId.value = null
+    triggerPopup('Berhasil!', `Status berhasil diperbarui ke ${newStatus}`, 'success')
   } catch (error) {
     console.error('Error updating status:', error)
-    alert('Gagal memperbarui status: ' + error.message)
+    triggerPopup('Gagal!', 'Gagal memperbarui status: ' + error.message, 'error')
   }
 }
 
@@ -138,7 +175,7 @@ const fetchModules = async () => {
 
 const openModal = (item = null) => {
   if (['Viewer'].includes(authStore.user?.role)) {
-    alert('Anda tidak memiliki izin untuk melakukan aksi ini.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk melakukan aksi ini.', 'error')
     return
   }
   if (item) {
@@ -175,7 +212,7 @@ const openModal = (item = null) => {
 
 const saveVersion = async () => {
   if (!authStore.user) {
-    alert('Anda harus login untuk menyimpan data.')
+    triggerPopup('Gagal!', 'Anda harus login untuk menyimpan data.', 'error')
     return
   }
 
@@ -183,7 +220,7 @@ const saveVersion = async () => {
   if (!defaultProjectId.value) {
     await fetchDefaultProject()
     if (!defaultProjectId.value) {
-      alert('Error: Data project tidak ditemukan. Pastikan tabel projects memiliki data.')
+      triggerPopup('Error', 'Data project tidak ditemukan. Pastikan tabel projects memiliki data.', 'error')
       return
     }
   }
@@ -216,14 +253,12 @@ const saveVersion = async () => {
     }
 
     showModal.value = false
-    fetchVersions()
+    await fetchVersions()
+    triggerPopup('Berhasil!', isEditing.value ? 'Data versi berhasil diperbarui.' : 'Versi baru berhasil ditambahkan.', 'success')
   } catch (error) {
     console.error('Error saving version:', error)
-    if (error.code === '42501') {
-      alert('Error: Izin ditolak (RLS). Pastikan Anda memiliki hak akses yang cukup di database.')
-    } else {
-      alert('Error saving version: ' + (error.message || 'Unknown error'))
-    }
+    const errorMsg = error.code === '42501' ? 'Izin ditolak (RLS). Pastikan Anda memiliki hak akses yang cukup.' : (error.message || 'Error tidak diketahui');
+    triggerPopup('Gagal!', 'Gagal menyimpan data: ' + errorMsg, 'error')
   } finally {
     modalLoading.value = false
   }
@@ -231,22 +266,31 @@ const saveVersion = async () => {
 
 const deleteVersion = async (id) => {
   if (['Viewer'].includes(authStore.user?.role)) {
-    alert('Anda tidak memiliki izin untuk menghapus data.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk menghapus data.', 'error')
     return
   }
-  if (!confirm('Apakah Anda yakin ingin menghapus data versi ini?')) return
   
-  try {
-    const { error } = await supabase
-      .from('version_logs')
-      .delete()
-      .eq('id', id)
-    
-    if (error) throw error
-    fetchVersions()
-  } catch (error) {
-    alert('Error deleting version: ' + error.message)
-  }
+  triggerPopup(
+    'Hapus Versi?', 
+    'Apakah Anda yakin ingin menghapus data versi ini secara permanen?', 
+    'error', 
+    async () => {
+      try {
+        const { error } = await supabase
+          .from('version_logs')
+          .delete()
+          .eq('id', id)
+        
+        if (error) throw error
+        await fetchVersions()
+        triggerPopup('Berhasil!', 'Data versi telah dihapus.', 'success')
+      } catch (error) {
+        console.error('Error deleting version:', error)
+        triggerPopup('Gagal!', 'Gagal menghapus: ' + error.message, 'error')
+      }
+    },
+    true
+  )
 }
 
 const navigateTo = (view, item = null) => {
@@ -665,6 +709,53 @@ const getTypeIconClass = (type) => {
             <span v-if="modalLoading" class="animate-spin size-4 border-2 border-white/30 border-t-white rounded-full"></span>
             {{ isEditing ? 'Update Versi' : 'Simpan Versi' }}
           </button>
+        </div>
+      </div>
+    </div>
+    <!-- POPUP NOTIFICATION -->
+    <div v-if="popup.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div 
+        @click="closePopup"
+        class="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300"
+      ></div>
+      <div class="relative bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+        <div class="p-8 text-center">
+          <div 
+            :class="[
+              'w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg',
+              popup.type === 'success' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30' : 
+              popup.type === 'error' ? 'bg-red-100 text-red-600 dark:bg-red-900/30' : 
+              'bg-amber-100 text-amber-600 dark:bg-amber-900/30'
+            ]"
+          >
+            <span class="material-symbols-outlined text-[40px]">
+              {{ popup.type === 'success' ? 'check_circle' : popup.type === 'error' ? 'error' : 'warning' }}
+            </span>
+          </div>
+          <h3 class="text-xl font-bold dark:text-white mb-2">{{ popup.title }}</h3>
+          <p class="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-8">
+            {{ popup.message }}
+          </p>
+          <div class="flex gap-3">
+            <button 
+              v-if="popup.showCancel"
+              @click="closePopup"
+              class="flex-1 px-6 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+            >
+              {{ popup.cancelText }}
+            </button>
+            <button 
+              @click="handlePopupConfirm"
+              :class="[
+                'flex-1 px-6 py-3 rounded-xl text-sm font-bold text-white shadow-lg transition-all',
+                popup.type === 'success' ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 
+                popup.type === 'error' ? 'bg-red-600 hover:bg-red-500 shadow-red-900/20' : 
+                'bg-amber-600 hover:bg-amber-500 shadow-amber-900/20'
+              ]"
+            >
+              {{ popup.confirmText }}
+            </button>
+          </div>
         </div>
       </div>
     </div>

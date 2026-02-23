@@ -11,6 +11,42 @@ const modules = ref([])
 const permissions = ref([])
 const loading = ref(true)
 
+// Popup State
+const popup = ref({
+  show: false,
+  title: '',
+  message: '',
+  type: 'success', // 'success', 'error', 'warning'
+  confirmCallback: null,
+  confirmText: 'OK',
+  cancelText: 'Batal',
+  showCancel: false
+})
+
+const triggerPopup = (title, message, type = 'success', onConfirm = null, showCancel = false) => {
+  popup.value = {
+    show: true,
+    title,
+    message,
+    type,
+    confirmCallback: onConfirm,
+    confirmText: onConfirm ? 'Ya, Lanjutkan' : 'OK',
+    cancelText: 'Batal',
+    showCancel
+  }
+}
+
+const closePopup = () => {
+  popup.value.show = false
+}
+
+const handlePopupConfirm = () => {
+  if (popup.value.confirmCallback) {
+    popup.value.confirmCallback()
+  }
+  closePopup()
+}
+
 // Modals State
 const showEditModal = ref(false)
 const showRoleModal = ref(false)
@@ -157,10 +193,11 @@ const savePermissions = async () => {
 
     showEditModal.value = false
     await fetchAccessData()
+    triggerPopup('Berhasil!', 'Hak akses berhasil diperbarui.', 'success')
   } catch (error) {
     console.error('Error saving permissions:', error)
     const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
-    alert('Error saving: ' + msg)
+    triggerPopup('Gagal!', 'Gagal menyimpan: ' + msg, 'error')
   } finally {
     modalLoading.value = false
   }
@@ -168,27 +205,31 @@ const savePermissions = async () => {
 
 const handleAddRole = async () => {
   if (!isSuperAdmin.value && currentUserProfile.value?.role !== 'Editor') {
-    alert('Anda tidak memiliki izin untuk menambah/mengedit role.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk menambah/mengedit role.', 'error')
     return
   }
   modalLoading.value = true
   console.log('Starting handleAddRole...')
   try {
     const config = { timeout: 10000 }
+    const projectId = authStore.user?.project_id || 1
+    const payload = { ...roleForm.value, project_id: projectId }
+    
     if (editingRoleId.value) {
-      await axios.patch(`/access_roles?id=eq.${editingRoleId.value}`, roleForm.value, config)
+      await axios.patch(`/access_roles?id=eq.${editingRoleId.value}`, payload, config)
     } else {
-      await axios.post('/access_roles', roleForm.value, config)
+      await axios.post('/access_roles', payload, config)
     }
     console.log('Role saved successfully')
     showRoleModal.value = false
     editingRoleId.value = null
     roleForm.value = { role_name: '', role_code: '' }
     await fetchAccessData()
+    triggerPopup('Berhasil!', 'Role berhasil disimpan.', 'success')
   } catch (error) { 
     console.error('Error in handleAddRole:', error)
     const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
-    alert('Gagal menyimpan role: ' + msg) 
+    triggerPopup('Gagal!', 'Gagal menyimpan role: ' + msg, 'error') 
   } finally { 
     modalLoading.value = false 
   }
@@ -202,29 +243,36 @@ const openEditRoleModal = (role) => {
 
 const handleDeleteRole = async (id) => {
   if (!isSuperAdmin.value && currentUserProfile.value?.role !== 'Editor') {
-    alert('Anda tidak memiliki izin untuk menghapus role.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk menghapus role.', 'error')
     return
   }
-  if (!confirm('Hapus role ini? Seluruh matriks hak akses untuk role ini akan hilang.')) return
-  modalLoading.value = true
-  console.log('Starting handleDeleteRole:', id)
-  try {
-    const config = { timeout: 10000 }
-    await axios.delete(`/access_roles?id=eq.${id}`, config)
-    console.log('Role deleted successfully')
-    await fetchAccessData()
-  } catch (error) { 
-    console.error('Error deleting role:', error)
-    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
-    alert('Gagal menghapus role: ' + msg) 
-  } finally { 
-    modalLoading.value = false 
-  }
+  
+  triggerPopup(
+    'Hapus Role?', 
+    'Seluruh matriks hak akses untuk role ini akan hilang. Lanjutkan?', 
+    'error', 
+    async () => {
+      modalLoading.value = true
+      try {
+        const config = { timeout: 10000 }
+        await axios.delete(`/access_roles?id=eq.${id}`, config)
+        await fetchAccessData()
+        triggerPopup('Berhasil!', 'Role berhasil dihapus.', 'success')
+      } catch (error) { 
+        console.error('Error deleting role:', error)
+        const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+        triggerPopup('Gagal!', 'Gagal menghapus role: ' + msg, 'error') 
+      } finally { 
+        modalLoading.value = false 
+      }
+    },
+    true
+  )
 }
 
 const handleAddModule = async () => {
   if (!isSuperAdmin.value && currentUserProfile.value?.role !== 'Editor') {
-    alert('Anda tidak memiliki izin untuk menambah/mengedit modul.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk menambah/mengedit modul.', 'error')
     return
   }
   modalLoading.value = true
@@ -251,10 +299,11 @@ const handleAddModule = async () => {
     
     console.log('Refreshing data...')
     await fetchAccessData()
+    triggerPopup('Berhasil!', 'Modul berhasil disimpan.', 'success')
   } catch (error) { 
     console.error('Error in handleAddModule:', error)
     const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
-    alert('Gagal menyimpan modul: ' + msg) 
+    triggerPopup('Gagal!', 'Gagal menyimpan modul: ' + msg, 'error') 
   } finally { 
     modalLoading.value = false 
   }
@@ -268,24 +317,31 @@ const openEditModuleModal = (mod) => {
 
 const handleDeleteModule = async (id) => {
   if (!isSuperAdmin.value && currentUserProfile.value?.role !== 'Editor') {
-    alert('Anda tidak memiliki izin untuk menghapus modul.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk menghapus modul.', 'error')
     return
   }
-  if (!confirm('Hapus modul ini? Seluruh matriks hak akses untuk modul ini akan hilang.')) return
-  modalLoading.value = true
-  console.log('Starting handleDeleteModule:', id)
-  try {
-    const config = { timeout: 10000 }
-    await axios.delete(`/app_components?id=eq.${id}`, config)
-    console.log('Module deleted successfully')
-    await fetchAccessData()
-  } catch (error) { 
-    console.error('Error deleting module:', error)
-    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
-    alert('Gagal menghapus modul: ' + msg) 
-  } finally { 
-    modalLoading.value = false 
-  }
+  
+  triggerPopup(
+    'Hapus Modul?', 
+    'Seluruh data yang berkaitan dengan modul ini akan hilang. Lanjutkan?', 
+    'error', 
+    async () => {
+      modalLoading.value = true
+      try {
+        const config = { timeout: 10000 }
+        await axios.delete(`/app_components?id=eq.${id}`, config)
+        await fetchAccessData()
+        triggerPopup('Berhasil!', 'Modul berhasil dihapus.', 'success')
+      } catch (error) { 
+        console.error('Error deleting module:', error)
+        const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+        triggerPopup('Gagal!', 'Gagal menghapus modul: ' + msg, 'error') 
+      } finally { 
+        modalLoading.value = false 
+      }
+    },
+    true
+  )
 }
 
 onMounted(() => {
@@ -544,7 +600,54 @@ const getRoleBadgeClass = (color) => {
       </div>
 
 
+      <!-- POPUP NOTIFICATION -->
+    <div v-if="popup.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div 
+        @click="closePopup"
+        class="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300"
+      ></div>
+      <div class="relative bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+        <div class="p-8 text-center">
+          <div 
+            :class="[
+              'w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg',
+              popup.type === 'success' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30' : 
+              popup.type === 'error' ? 'bg-red-100 text-red-600 dark:bg-red-900/30' : 
+              'bg-amber-100 text-amber-600 dark:bg-amber-900/30'
+            ]"
+          >
+            <span class="material-symbols-outlined text-[40px]">
+              {{ popup.type === 'success' ? 'check_circle' : popup.type === 'error' ? 'error' : 'warning' }}
+            </span>
+          </div>
+          <h3 class="text-xl font-bold dark:text-white mb-2">{{ popup.title }}</h3>
+          <p class="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-8">
+            {{ popup.message }}
+          </p>
+          <div class="flex gap-3">
+            <button 
+              v-if="popup.showCancel"
+              @click="closePopup"
+              class="flex-1 px-6 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+            >
+              {{ popup.cancelText }}
+            </button>
+            <button 
+              @click="handlePopupConfirm"
+              :class="[
+                'flex-1 px-6 py-3 rounded-xl text-sm font-bold text-white shadow-lg transition-all',
+                popup.type === 'success' ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 
+                popup.type === 'error' ? 'bg-red-600 hover:bg-red-500 shadow-red-900/20' : 
+                'bg-amber-600 hover:bg-amber-500 shadow-amber-900/20'
+              ]"
+            >
+              {{ popup.confirmText }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
+  </div>
 </template>
 
 <style scoped>

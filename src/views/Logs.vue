@@ -52,7 +52,7 @@ const currentUser = ref(null)
 const currentUserRole = ref(authStore.user?.role || 'Viewer')
 const comments = ref([])
 const activities = ref([])
-const defaultProjectId = ref(1)
+const defaultProjectId = ref(authStore.user?.project_id || 1)
 const isSubmitting = ref(false)
 const showCharts = ref(true)
 const allProfiles = ref([]) // Untuk pilihan pelapor
@@ -61,7 +61,7 @@ const currentUserId = computed(() => currentUser.value?.id || authStore.user?.id
 
 // Form State
 const logForm = ref({
-  project_id: 1, 
+  project_id: authStore.user?.project_id || 1, 
   no_lap: 0,
   module: '',
   version: '',
@@ -333,17 +333,20 @@ const fetchDefaultProject = async () => {
 }
 
 const getNextNoLap = async () => {
-  console.log('getNextNoLap started')
+  console.log('getNextNoLap started (Axios Version)')
   try {
-    const projectId = logForm.value.project_id || defaultProjectId.value
-    if (!projectId) {
-      console.warn('Project ID is missing for getNextNoLap, defaulting to 101')
-      return 101
-    }
-    console.log('Fetching next no_lap for project:', projectId)
+    const projectId = logForm.value.project_id || defaultProjectId.value || 1
     
-    // Explicitly select only no_lap to minimize data transfer
-    const response = await axios.get(`/logs?project_id=eq.${projectId}&select=no_lap&order=no_lap.desc&limit=1`)
+    // Gunakan axios karena terbukti lebih stabil di browser user saat ini
+    const response = await axios.get(`/logs`, {
+      params: {
+        project_id: `eq.${projectId}`,
+        select: 'no_lap',
+        order: 'no_lap.desc',
+        limit: 1
+      },
+      timeout: 5000 // Timeout cepat agar tidak hang
+    })
     
     console.log('getNextNoLap response:', response.data)
     if (response.data && response.data.length > 0) {
@@ -352,8 +355,8 @@ const getNextNoLap = async () => {
     }
     return 101
   } catch (error) {
-    console.error('Error fetching next no_lap:', error)
-    // Return a safe default if fetch fails, but log it clearly
+    console.error('Error in getNextNoLap (Axios):', error)
+    // Berikan fallback aman
     return 101
   }
 }
@@ -521,7 +524,7 @@ const saveNewLog = async (formData) => {
   try {
     // Get next no_lap from DB
     const nextNoLap = await getNextNoLap()
-    console.log('Next No Lap:', nextNoLap)
+    console.log('Final Next No Lap to use:', nextNoLap)
 
     const { dbPriority, dbStatus } = mapToDbValues(formData)
     
@@ -540,30 +543,29 @@ const saveNewLog = async (formData) => {
       found_date: formattedDate,
       priority: dbPriority,
       status: dbStatus,
-      reporter_id: formData.reporter_id || currentUser.value?.id || null,
+      reporter_id: formData.reporter_id || currentUser.value?.id || authStore.user?.id || null,
       actual_behavior: formData.actual_behavior,
       expected_behavior: formData.expected_behavior,
       severity_details: formData.severity_details,
       attachment_link: formData.attachment_link || null
-      // created_at and updated_at are handled by DB defaults and triggers
     }
     
-    console.log('Sending Payload:', dataToInsert)
+    console.log('Sending saveNewLog via Axios with payload:', dataToInsert)
 
     // Axios POST
     const response = await axios.post('/logs', dataToInsert, {
       headers: { 'Prefer': 'return=representation' }
     })
     
-    console.log('Save response:', response)
+    console.log('Save success (Axios):', response.data)
 
     await fetchLogs()
     
     navigateTo('all')
     triggerPopup('Berhasil!', 'Log bug baru telah berhasil disimpan ke sistem.', 'success')
   } catch (error) {
-    console.error('Error saving log:', error.response?.data || error)
-    const dbError = error.response?.data?.message || error.response?.data?.hint || error.message
+    console.error('Detailed error in saveNewLog:', error)
+    const dbError = error.response?.data?.message || error.message || 'Unknown database error'
     triggerPopup('Gagal!', 'Terjadi kesalahan saat menyimpan log: ' + dbError, 'error')
   }
 }
@@ -589,16 +591,22 @@ const updateLog = async (formData) => {
       updated_at: new Date().toISOString()
     }
     
+    console.log('Sending updateLog via Axios for ID:', selectedLog.value.id)
+
     // Axios PATCH
-    await axios.patch(`/logs?id=eq.${selectedLog.value.id}`, dataToUpdate)
+    await axios.patch(`/logs?id=eq.${selectedLog.value.id}`, dataToUpdate, {
+      headers: { 'Prefer': 'return=minimal' }
+    })
+    
+    console.log('Update success (Axios)')
     
     await fetchLogs()
     
     navigateTo('all')
     triggerPopup('Berhasil!', 'Data log bug telah diperbarui.', 'success')
   } catch (error) {
-    console.error('Error updating log:', error.response?.data || error)
-    const dbError = error.response?.data?.message || error.message
+    console.error('Detailed error in updateLog:', error)
+    const dbError = error.response?.data?.message || error.message || 'Unknown database error'
     triggerPopup('Gagal!', 'Gagal memperbarui log: ' + dbError, 'error')
   }
 }

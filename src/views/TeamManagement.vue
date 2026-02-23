@@ -12,6 +12,42 @@ const isLoading = ref(true)
 const searchQuery = ref('')
 const roleFilter = ref('all')
 
+// Popup State
+const popup = ref({
+  show: false,
+  title: '',
+  message: '',
+  type: 'success', // 'success', 'error', 'warning'
+  confirmCallback: null,
+  confirmText: 'OK',
+  cancelText: 'Batal',
+  showCancel: false
+})
+
+const triggerPopup = (title, message, type = 'success', onConfirm = null, showCancel = false) => {
+  popup.value = {
+    show: true,
+    title,
+    message,
+    type,
+    confirmCallback: onConfirm,
+    confirmText: onConfirm ? 'Ya, Lanjutkan' : 'OK',
+    cancelText: 'Batal',
+    showCancel
+  }
+}
+
+const closePopup = () => {
+  popup.value.show = false
+}
+
+const handlePopupConfirm = () => {
+  if (popup.value.confirmCallback) {
+    popup.value.confirmCallback()
+  }
+  closePopup()
+}
+
 // Role access check
 const isSuperAdmin = computed(() => currentUserProfile.value?.role === 'Super Admin')
 
@@ -98,7 +134,7 @@ const filteredMembers = computed(() => {
 
 const openModal = (member = null) => {
   if (!isSuperAdmin.value) {
-    alert('Hanya Super Admin yang dapat menambah atau mengedit anggota!')
+    triggerPopup('Akses Ditolak', 'Hanya Super Admin yang dapat menambah atau mengedit anggota!', 'error')
     return
   }
   if (member) {
@@ -134,7 +170,7 @@ const closeModal = () => {
 
 const handleSubmit = async () => {
   if (!isSuperAdmin.value) {
-    alert('Hanya Super Admin yang dapat menambah atau mengedit anggota!')
+    triggerPopup('Akses Ditolak', 'Hanya Super Admin yang dapat menambah atau mengedit anggota!', 'error')
     return
   }
   
@@ -217,11 +253,11 @@ const handleSubmit = async () => {
     
     await fetchTeamMembers()
     closeModal()
-    showSuccessModal.value = true
+    triggerPopup('Berhasil!', isEditing.value ? 'Profil anggota berhasil diperbarui!' : 'Anggota tim berhasil ditambahkan!', 'success')
   } catch (error) {
     console.error('Error saving member:', error)
     const errorMsg = error.message || error.details || 'Error tidak diketahui'
-    alert('Gagal menyimpan data: ' + errorMsg)
+    triggerPopup('Gagal!', 'Gagal menyimpan data: ' + errorMsg, 'error')
   } finally {
     formLoading.value = false
   }
@@ -229,30 +265,36 @@ const handleSubmit = async () => {
 
 const deleteMember = async (id) => {
   if (!isSuperAdmin.value) {
-    alert('Hanya Super Admin yang dapat menghapus anggota!')
+    triggerPopup('Akses Ditolak', 'Hanya Super Admin yang dapat menghapus anggota!', 'error')
     return
   }
   
   const { data: { user } } = await supabase.auth.getUser()
   if (id === user?.id) {
-    alert('Anda tidak bisa menghapus akun Anda sendiri!')
+    triggerPopup('Peringatan!', 'Anda tidak bisa menghapus akun Anda sendiri!', 'warning')
     return
   }
 
-  if (!confirm('Apakah Anda yakin ingin menghapus akses anggota ini?')) return
-  
-  try {
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', id)
-      
-    if (error) throw error
-    await fetchTeamMembers()
-    alert('Akses anggota telah dicabut dari sistem.')
-  } catch (error) {
-    alert('Gagal menghapus data: ' + error.message)
-  }
+  triggerPopup(
+    'Hapus Akses?', 
+    'Apakah Anda yakin ingin menghapus akses anggota ini?', 
+    'error', 
+    async () => {
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', id)
+          
+        if (error) throw error
+        await fetchTeamMembers()
+        triggerPopup('Berhasil!', 'Akses anggota telah dicabut dari sistem.', 'success')
+      } catch (error) {
+        triggerPopup('Gagal!', 'Gagal menghapus data: ' + error.message, 'error')
+      }
+    },
+    true
+  )
 }
 
 onMounted(() => {
@@ -604,5 +646,52 @@ onMounted(() => {
         </div>
       </div>
     </Transition>
+    <!-- POPUP NOTIFICATION -->
+    <div v-if="popup.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div 
+        @click="closePopup"
+        class="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300"
+      ></div>
+      <div class="relative bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+        <div class="p-8 text-center">
+          <div 
+            :class="[
+              'w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg',
+              popup.type === 'success' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30' : 
+              popup.type === 'error' ? 'bg-red-100 text-red-600 dark:bg-red-900/30' : 
+              'bg-amber-100 text-amber-600 dark:bg-amber-900/30'
+            ]"
+          >
+            <span class="material-symbols-outlined text-[40px]">
+              {{ popup.type === 'success' ? 'check_circle' : popup.type === 'error' ? 'error' : 'warning' }}
+            </span>
+          </div>
+          <h3 class="text-xl font-bold dark:text-white mb-2">{{ popup.title }}</h3>
+          <p class="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-8">
+            {{ popup.message }}
+          </p>
+          <div class="flex gap-3">
+            <button 
+              v-if="popup.showCancel"
+              @click="closePopup"
+              class="flex-1 px-6 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+            >
+              {{ popup.cancelText }}
+            </button>
+            <button 
+              @click="handlePopupConfirm"
+              :class="[
+                'flex-1 px-6 py-3 rounded-xl text-sm font-bold text-white shadow-lg transition-all',
+                popup.type === 'success' ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 
+                popup.type === 'error' ? 'bg-red-600 hover:bg-red-500 shadow-red-900/20' : 
+                'bg-amber-600 hover:bg-amber-500 shadow-amber-900/20'
+              ]"
+            >
+              {{ popup.confirmText }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

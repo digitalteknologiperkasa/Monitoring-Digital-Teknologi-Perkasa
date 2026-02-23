@@ -25,6 +25,42 @@ const modalLoading = ref(false)
 const selectedRequest = ref(null)
 const openDropdownId = ref(null)
 
+// Popup State
+const popup = ref({
+  show: false,
+  title: '',
+  message: '',
+  type: 'success', // 'success', 'error', 'warning'
+  confirmCallback: null,
+  confirmText: 'OK',
+  cancelText: 'Batal',
+  showCancel: false
+})
+
+const triggerPopup = (title, message, type = 'success', onConfirm = null, showCancel = false) => {
+  popup.value = {
+    show: true,
+    title,
+    message,
+    type,
+    confirmCallback: onConfirm,
+    confirmText: onConfirm ? 'Ya, Lanjutkan' : 'OK',
+    cancelText: 'Batal',
+    showCancel
+  }
+}
+
+const closePopup = () => {
+  popup.value.show = false
+}
+
+const handlePopupConfirm = () => {
+  if (popup.value.confirmCallback) {
+    popup.value.confirmCallback()
+  }
+  closePopup()
+}
+
 const toggleDropdown = (id) => {
   openDropdownId.value = openDropdownId.value === id ? null : id
 }
@@ -35,7 +71,7 @@ const modalFile = ref(null)
 const modalFileInput = ref(null)
 
 const form = ref({
-  project_id: '',
+  project_id: authStore.user?.project_id || 1,
   component_id: '',
   reporter_id: '', // Field pelapor baru
   judul_request: '',
@@ -321,14 +357,14 @@ const fetchRequests = async () => {
 const saveRequest = async () => {
     if (modalLoading.value) return
     if (!authStore.user) {
-      alert('Anda harus login untuk mengirim request.')
+      triggerPopup('Gagal!', 'Anda harus login untuk mengirim request.', 'error')
       return
     }
 
     // Strict Role Check (Client Side)
     const allowedRoles = ['Super Admin', 'Admin', 'Editor']
     if (!allowedRoles.includes(authStore.user.role)) {
-      alert('Akses Ditolak: Hanya Editor dan Super Admin yang dapat menambahkan fitur baru.')
+      triggerPopup('Akses Ditolak', 'Hanya Editor dan Super Admin yang dapat menambahkan fitur baru.', 'error')
       return
     }
 
@@ -343,101 +379,92 @@ const saveRequest = async () => {
     // 1. Ambil data dari form dan bersihkan (konversi empty string ke null)
     const f = form.value
     
-    // 2. Konstruksi payload secara eksplisit sesuai kolom database
+    // 2. Konstruksi payload secara eksplisit sesuai kolom database dengan sanitasi
     const payload = {
       project_id: Number(authStore.user?.project_id || f.project_id || 1),
       reporter_id: f.reporter_id || authStore.user.id,
       component_id: f.component_id || null,
       status_perwakilan: f.status_perwakilan,
-      kode_pesantren: f.status_perwakilan === 'Inisiatif Sendiri' ? null : (f.kode_pesantren || null),
-      unit_yayasan: f.unit_yayasan || null,
-      kategori_modul: f.kategori_modul || null,
-      judul_request: f.judul_request,
+      kode_pesantren: f.status_perwakilan === 'Inisiatif Sendiri' ? null : (f.kode_pesantren ? f.kode_pesantren.trim() : null),
+      unit_yayasan: f.unit_yayasan ? f.unit_yayasan.trim() : null,
+      kategori_modul: f.kategori_modul ? f.kategori_modul.trim() : null,
+      judul_request: f.judul_request ? f.judul_request.trim() : '',
       kategori_dev: f.kategori_dev,
-      deskripsi_masukan: f.deskripsi_masukan || null,
-      masalah: f.masalah || null,
-      usulan: f.usulan || null,
-      dampak: f.dampak || null,
+      deskripsi_masukan: f.deskripsi_masukan ? f.deskripsi_masukan.trim() : null,
+      masalah: f.masalah ? f.masalah.trim() : null,
+      usulan: f.usulan ? f.usulan.trim() : null,
+      dampak: f.dampak ? f.dampak.trim() : null,
       urgensi: f.urgensi || 'Medium',
-      attachment_wa: f.attachment_wa || null,
-      attachment_lain: fileUrl || f.attachment_lain || null,
+      attachment_wa: f.attachment_wa ? f.attachment_wa.trim() : null,
+      attachment_lain: fileUrl || (f.attachment_lain ? f.attachment_lain.trim() : null),
       status_lifecycle: 'Baru'
     }
 
     console.log('Sending feature request explicit payload via axios:', payload)
 
-    // 3. Eksekusi insert menggunakan Supabase SDK (LEBIH STABIL DARI AXIOS UNTUK POST)
-    console.log('Attempting insert via Supabase SDK (Primary)...')
+    // 3. Eksekusi menggunakan Axios (Terbukti lebih stabil di browser ini)
+    console.log('Sending feature request via Axios...')
     
-    // Kita gunakan Supabase SDK sebagai metode UTAMA karena Axios sering bermasalah dengan CORS/Headers di production
-    // Hapus .select() agar lebih ringan dan mengurangi potensi RLS read blocking
-    const insertPromise = supabase
-      .from('feature_requests')
-      .insert(payload)
-
-    // Timeout 10 detik
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Force Timeout 10s: Supabase SDK request hung')), 10000)
-    )
-
-    try {
-      const result = await Promise.race([insertPromise, timeoutPromise])
-      const { error } = result || {}
-
-      if (error) throw error
-      
-      console.log('Supabase SDK Insert success (no data returned for speed)')
-
-      // Reset loading state
-      modalLoading.value = false
-      showAddModal.value = false
-      resetForm()
-      fetchRequests()
-      alert('Request fitur berhasil dikirim!')
-    } catch (sdkError) {
-      console.error('Supabase SDK insert failed, trying Axios fallback...', sdkError)
-      
-      // 4. Fallback ke Axios jika SDK gagal (jarang terjadi, tapi untuk safety)
       const config = { 
-        timeout: 10000,
+        timeout: 20000,
         headers: {
           'Content-Type': 'application/json',
           'Prefer': 'return=representation'
         }
       }
       
-      const { data } = await axios.post('/feature_requests', payload, config)
-      console.log('Axios Fallback success:', data)
-      
+      const response = await axios.post('/feature_requests', payload, config)
+      console.log('Submission success (Axios):', response.data)
+
+      // Reset loading state and form
       modalLoading.value = false
       showAddModal.value = false
-      resetForm()
-      fetchRequests()
-      alert('Request fitur berhasil dikirim (via Fallback)!')
+      
+      form.value = {
+        project_id: authStore.user?.project_id || 1,
+        reporter_id: authStore.user?.id,
+        component_id: '',
+        status_perwakilan: 'Inisiatif Sendiri',
+        kode_pesantren: '',
+        unit_yayasan: '',
+        kategori_modul: '',
+        judul_request: '',
+        kategori_dev: 'Fitur Baru',
+        deskripsi_masukan: '',
+        masalah: '',
+        usulan: '',
+        dampak: '',
+        urgensi: 'Medium',
+        attachment_wa: '',
+        attachment_lain: ''
+      }
+      modalFile.value = null
+      
+      await fetchRequests()
+      triggerPopup('Berhasil!', 'Pengajuan fitur berhasil dikirim', 'success')
+
+    } catch (error) {
+      console.error('Final catch error saving request:', error)
+      modalLoading.value = false
+      
+      let errorMsg = 'Terjadi kesalahan pada server database'
+      if (error.response?.data?.message) {
+        errorMsg = error.response.data.message
+      } else if (error.message?.includes('Timeout') || error.code === 'ECONNABORTED') {
+        errorMsg = 'Request timed out (30s). Mohon periksa koneksi internet Anda atau coba lagi nanti.'
+      } else if (error.message) {
+        errorMsg = error.message
+      }
+      
+      triggerPopup('Gagal Menyimpan', errorMsg, 'error')
+    } finally {
+      modalLoading.value = false
     }
-  } catch (error) {
-    console.error('Final catch error saving request:', error)
-    modalLoading.value = false
-    
-    let errorMsg = 'Terjadi kesalahan pada server database'
-    
-    if (error.message?.includes('Timeout') || error.code === 'ECONNABORTED') {
-      errorMsg = 'Request timed out. Mohon jalankan script SQL "fix_rls_final.sql" di Supabase Dashboard untuk memperbaiki izin akses.'
-    } else if (error.message) {
-      errorMsg = error.message
-    } else if (error.details) {
-      errorMsg = error.details
-    }
-    
-    alert('Gagal menyimpan request: ' + errorMsg)
-  } finally {
-    modalLoading.value = false
-  }
 }
 
 const updateStatus = async (id, newStatus) => {
   if (!['Super Admin', 'Admin', 'Editor'].includes(authStore.user?.role)) {
-    alert('Anda tidak memiliki izin untuk mengubah status.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk mengubah status.', 'error')
     return
   }
   if (newStatus === 'Ditolak' && !showRejectionModal.value) {
@@ -481,11 +508,11 @@ const updateStatus = async (id, newStatus) => {
       if (updatedReq) selectedRequest.value = updatedReq
     }
     openDropdownId.value = null
-    alert(`Status berhasil diperbarui ke ${newStatus}`)
+    triggerPopup('Berhasil!', `Status berhasil diperbarui ke ${newStatus}`, 'success')
   } catch (error) {
     console.error('Error updating status:', error)
     const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
-    alert('Gagal memperbarui status: ' + msg)
+    triggerPopup('Gagal!', 'Gagal memperbarui status: ' + msg, 'error')
   }
 }
 
@@ -531,23 +558,30 @@ const syncBacklogFinish = async (requestId) => {
 
 const deleteRequest = async (id) => {
   if (!['Super Admin', 'Admin', 'Editor'].includes(authStore.user?.role)) {
-    alert('Anda tidak memiliki izin untuk menghapus data.')
+    triggerPopup('Akses Ditolak', 'Anda tidak memiliki izin untuk menghapus data.', 'error')
     return
   }
-  if (!confirm('Apakah Anda yakin ingin menghapus pengajuan ini?')) return
   
-  try {
-    const config = { timeout: 10000 }
-    await axios.delete(`/feature_requests?id=eq.${id}`, config)
-    
-    await fetchRequests()
-    showDetailModal.value = false
-    alert('Pengajuan berhasil dihapus')
-  } catch (error) {
-    console.error('Error deleting request:', error)
-    const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
-    alert('Gagal menghapus: ' + msg)
-  }
+  triggerPopup(
+    'Hapus Pengajuan?', 
+    'Apakah Anda yakin ingin menghapus pengajuan ini secara permanen?', 
+    'error', 
+    async () => {
+      try {
+        const config = { timeout: 10000 }
+        await axios.delete(`/feature_requests?id=eq.${id}`, config)
+        
+        await fetchRequests()
+        showDetailModal.value = false
+        triggerPopup('Berhasil!', 'Pengajuan berhasil dihapus', 'success')
+      } catch (error) {
+        console.error('Error deleting request:', error)
+        const msg = error.code === 'ECONNABORTED' ? 'Request timed out (Check RLS policies)' : (error.response?.data?.message || error.message);
+        triggerPopup('Gagal!', 'Gagal menghapus: ' + msg, 'error')
+      }
+    },
+    true
+  )
 }
 
 const resetForm = () => {
@@ -1385,6 +1419,53 @@ watch(() => form.value.project_id, () => {
           >
             Konfirmasi Tolak
           </button>
+        </div>
+      </div>
+    </div>
+    <!-- POPUP NOTIFICATION -->
+    <div v-if="popup.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div 
+        @click="closePopup"
+        class="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300"
+      ></div>
+      <div class="relative bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300">
+        <div class="p-8 text-center">
+          <div 
+            :class="[
+              'w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg',
+              popup.type === 'success' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30' : 
+              popup.type === 'error' ? 'bg-red-100 text-red-600 dark:bg-red-900/30' : 
+              'bg-amber-100 text-amber-600 dark:bg-amber-900/30'
+            ]"
+          >
+            <span class="material-symbols-outlined text-[40px]">
+              {{ popup.type === 'success' ? 'check_circle' : popup.type === 'error' ? 'error' : 'warning' }}
+            </span>
+          </div>
+          <h3 class="text-xl font-bold dark:text-white mb-2">{{ popup.title }}</h3>
+          <p class="text-gray-500 dark:text-gray-400 text-sm leading-relaxed mb-8">
+            {{ popup.message }}
+          </p>
+          <div class="flex gap-3">
+            <button 
+              v-if="popup.showCancel"
+              @click="closePopup"
+              class="flex-1 px-6 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+            >
+              {{ popup.cancelText }}
+            </button>
+            <button 
+              @click="handlePopupConfirm"
+              :class="[
+                'flex-1 px-6 py-3 rounded-xl text-sm font-bold text-white shadow-lg transition-all',
+                popup.type === 'success' ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20' : 
+                popup.type === 'error' ? 'bg-red-600 hover:bg-red-500 shadow-red-900/20' : 
+                'bg-amber-600 hover:bg-amber-500 shadow-amber-900/20'
+              ]"
+            >
+              {{ popup.confirmText }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
